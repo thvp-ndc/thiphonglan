@@ -1,0 +1,22 @@
+﻿;The comment below contains SFX script commands
+
+Title=CÀI ĐẶT HỆ THỐNG THI MÁY TÍNH MẠNG LAN
+Text
+{
+==================================================================
+   HỆ THỐNG THI MÁY TÍNH QUA MẠNG LAN
+   Trường THCS - THPT Đặng Chí Thanh
+==================================================================
+
+Bộ cài đặt trọn gói bao gồm:
+  ✔ Máy chủ Giáo Viên (Quản lý đề thi, học sinh, giám sát trực tuyến)
+  ✔ Tích hợp sẵn môi trường Node.js Portable (KHÔNG CẦN CÀI THÊM GÌ)
+  ✔ Tự động cấu hình mở Tường Lửa Windows (Firewall) cho máy con
+  ✔ Tự động tạo biểu tượng ngoài màn hình Desktop
+
+Vui lòng bấm [Cài đặt] để giải nén và tự động thiết lập hệ thống.
+}
+Path=C:\HeThongThiLAN
+SavePath
+Setup=setup_install.bat
+Overwrite=1

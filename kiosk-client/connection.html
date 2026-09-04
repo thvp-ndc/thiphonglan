@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Khởi Động Ứng Dụng Kiosk Khảo Thí</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    body {
+      background: #090d16;
+      color: #f1f5f9;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      user-select: none;
+      overflow: hidden;
+    }
+    .card {
+      background: #111827;
+      border: 1px solid #1f2937;
+      border-radius: 20px;
+      padding: 40px;
+      max-width: 480px;
+      width: 90%;
+      text-align: center;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+    }
+    .radar {
+      width: 70px;
+      height: 70px;
+      border-radius: 50%;
+      background: rgba(14, 165, 233, 0.15);
+      margin: 0 auto 20px;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 2px solid #0ea5e9;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(14, 165, 233, 0.4); }
+      70% { box-shadow: 0 0 0 20px rgba(14, 165, 233, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(14, 165, 233, 0); }
+    }
+    h2 { font-size: 20px; font-weight: 800; color: #fff; margin-bottom: 8px; }
+    p { font-size: 13px; color: #94a3b8; line-height: 1.5; margin-bottom: 24px; }
+    .status-badge {
+      display: inline-block;
+      padding: 6px 14px;
+      border-radius: 9999px;
+      background: #082f49;
+      color: #38bdf8;
+      border: 1px solid #0369a1;
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 20px;
+    }
+    .manual-box {
+      background: #030712;
+      border: 1px solid #1e293b;
+      border-radius: 12px;
+      padding: 16px;
+      text-align: left;
+    }
+    .manual-box label {
+      display: block;
+      font-size: 11px;
+      text-transform: uppercase;
+      font-weight: 700;
+      color: #64748b;
+      margin-bottom: 6px;
+    }
+    .input-group {
+      display: flex;
+      gap: 8px;
+    }
+    input {
+      flex: 1;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 8px 12px;
+      color: #fff;
+      font-size: 13px;
+      font-family: monospace;
+    }
+    input:focus { outline: none; border-color: #0ea5e9; }
+    button {
+      background: #0ea5e9;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 8px 16px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+    button:hover { background: #0284c7; }
+    .footer-note {
+      font-size: 11px;
+      color: #475569;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="radar">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 20h.01"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/><path d="M5 12.859a10 10 0 0 1 14 0"/><path d="M1.5 9.288a15 15 0 0 1 21 0"/>
+      </svg>
+    </div>
+
+    <h2>Khởi Động Phòng Thi Mạng LAN</h2>
+    <div class="status-badge" id="statusBadge">Đang quét UDP Broadcast (Port 41234)...</div>
+    <p id="descText">Ứng dụng Kiosk đang tự động tìm kiếm máy chủ giáo viên trong phòng máy nội bộ.</p>
+
+    <div class="manual-box">
+      <label>Nhập IP máy chủ thủ công (Dự phòng):</label>
+      <div class="input-group">
+        <input type="text" id="ipInput" placeholder="http://192.168.1.8:3000" value="http://localhost:3000">
+        <button onclick="handleManualConnect()">Vào Thi</button>
+      </div>
+    </div>
+
+    <div class="footer-note">
+      Chế độ Kiosk khóa cứng • Vô hiệu hóa Alt+Tab & Phím Windows
+    </div>
+  </div>
+
+  <script>
+    function handleManualConnect() {
+      const url = document.getElementById('ipInput').value.trim();
+      if (!url) return alert('Vui lòng nhập URL máy chủ!');
+      const target = url.endsWith('/student') ? url : (url.replace(/\/$/, '') + '/student');
+      window.kioskAPI.connectToServer(target);
+    }
+
+    // Listen for automatic discovery from main process
+    if (window.kioskAPI && window.kioskAPI.onServerFound) {
+      window.kioskAPI.onServerFound((server) => {
+        document.getElementById('statusBadge').innerText = '✓ ĐÃ TÌM THẤY MÁY CHỦ!';
+        document.getElementById('statusBadge').style.background = '#064e3b';
+        document.getElementById('statusBadge').style.color = '#34d399';
+        document.getElementById('descText').innerHTML = 'Kết nối tới: <strong>' + server.ip + ':' + server.port + '</strong><br>Đang tải giao diện phòng thi...';
+        
+        setTimeout(() => {
+          const targetUrl = 'http://' + server.ip + ':' + server.port + '/student';
+          window.kioskAPI.connectToServer(targetUrl);
+        }, 1200);
+      });
+    }
+  </script>
+</body>
+</html>

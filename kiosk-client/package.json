@@ -1,0 +1,13 @@
+{
+  "name": "lan-exam-kiosk-client",
+  "version": "1.0.0",
+  "description": "Native Secure Lockdown Kiosk App for LAN Exams",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "kiosk": "electron . --kiosk"
+  },
+  "dependencies": {
+    "electron": "^34.2.0"
+  }
+}

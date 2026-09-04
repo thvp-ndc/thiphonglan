@@ -1,0 +1,21 @@
+{
+  "name": "lan-exam-system",
+  "version": "1.0.0",
+  "description": "Hệ Thống Thi Máy Tính Mạng LAN (Trắc Nghiệm & Tự Luận)",
+  "private": true,
+  "scripts": {
+    "server": "cd server && npm start",
+    "client": "cd client && npm run dev",
+    "build:client": "cd client && npm run build",
+    "kiosk": "cd kiosk-client && npm start",
+    "start": "cd server && npm start"
+  },
+  "keywords": [
+    "lan-exam",
+    "kiosk",
+    "offline-exam",
+    "anti-cheat",
+    "essay-grading"
+  ],
+  "author": "Antigravity IT Specialist"
+}
