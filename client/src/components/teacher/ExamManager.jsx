@@ -462,24 +462,6 @@ export default function ExamManager({ onSelectSessionForMonitor, onSelectSession
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <button
-            type="button"
-            onClick={() => window.open('/api/exams/template/download-word', '_blank')}
-            className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-bold text-xs transition shadow-md"
-            title="Tải file Word mẫu chuẩn 3 phần (Trắc nghiệm, Đúng/Sai, Tự luận) theo cấu trúc Bộ GD&ĐT 2025"
-          >
-            <Download className="w-4 h-4" /> Tải Mẫu Word (BGDĐT 2025)
-          </button>
-          <label className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold text-xs transition shadow-md cursor-pointer">
-            <FileUp className="w-4 h-4" /> {importingWord ? 'Đang Đọc Word...' : 'Nhập Đề Từ File Word (.docx)'}
-            <input
-              type="file"
-              accept=".docx"
-              onChange={handleWordFileUpload}
-              className="hidden"
-              disabled={importingWord}
-            />
-          </label>
-          <button
             onClick={() => handleOpenCreateSession()}
             className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-xs transition shadow-md"
           >
