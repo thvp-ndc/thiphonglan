@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
-import { Clock, CheckCircle, AlertTriangle, Send, ShieldAlert, Flag, Check, FileText, Maximize2 } from 'lucide-react';
+import { Clock, CheckCircle, AlertTriangle, Send, ShieldAlert, Flag, Check, FileText, Maximize2, Eye } from 'lucide-react';
 import MathContent from '../common/MathContent';
 
 export default function StudentExam({ examData, onExamFinished }) {
@@ -569,21 +569,50 @@ export default function StudentExam({ examData, onExamFinished }) {
               {currentQ.question_type === 'essay' ? (
                 /* ESSAY TEXTAREA */
                 <div className="space-y-3">
-                  <div className="flex items-center justify-between text-xs text-amber-400/90 font-medium bg-amber-950/20 border border-amber-800/40 px-3 py-2 rounded-lg">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-amber-400/90 font-medium bg-amber-950/20 border border-amber-800/40 px-3 py-2 rounded-lg">
                     <span className="flex items-center gap-1.5">
                       <FileText className="w-4 h-4" /> Dạng câu hỏi tự luận - Soạn bài trực tiếp vào khung dưới đây:
                     </span>
-                    <span className="font-mono text-slate-300">
-                      Số từ: {currentAnswer.essay_content ? currentAnswer.essay_content.trim().split(/\s+/).filter(Boolean).length : 0} | Ký tự: {currentAnswer.essay_content ? currentAnswer.essay_content.length : 0}
-                    </span>
+                    <div className="flex items-center gap-3 text-xs">
+                      <span className="text-[11px] text-emerald-400 bg-emerald-950/50 px-2 py-0.5 rounded border border-emerald-800/60 hidden sm:inline">
+                        Phím Tab: thụt lề 4 dấu cách
+                      </span>
+                      <span className="font-mono text-slate-300">
+                        Số từ: {currentAnswer.essay_content ? currentAnswer.essay_content.trim().split(/\s+/).filter(Boolean).length : 0} | Ký tự: {currentAnswer.essay_content ? currentAnswer.essay_content.length : 0}
+                      </span>
+                    </div>
                   </div>
                   <textarea
                     rows={12}
                     value={currentAnswer.essay_content || ''}
                     onChange={e => handleEssayChange(e.target.value)}
-                    placeholder="Gõ nội dung bài làm tự luận của bạn tại đây... (Dữ liệu sẽ được tự động lưu liên tục về máy chủ)"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-4 text-white text-sm leading-relaxed focus:border-sky-500 focus:outline-none font-sans resize-y"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Tab') {
+                        e.preventDefault();
+                        const start = e.target.selectionStart;
+                        const end = e.target.selectionEnd;
+                        const val = e.target.value;
+                        const newVal = val.substring(0, start) + '    ' + val.substring(end);
+                        handleEssayChange(newVal);
+                        setTimeout(() => {
+                          e.target.selectionStart = e.target.selectionEnd = start + 4;
+                        }, 0);
+                      }
+                    }}
+                    placeholder="Gõ nội dung bài làm tự luận hoặc đoạn mã lập trình của bạn tại đây... (Hỗ trợ thụt lề bằng phím Tab, tự động lưu liên tục)"
+                    style={{ tabSize: 4 }}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-4 text-white text-sm leading-relaxed focus:border-sky-500 focus:outline-none font-mono resize-y"
                   />
+                  {currentAnswer.essay_content && (currentAnswer.essay_content.includes('```') || currentAnswer.essay_content.includes('$') || currentAnswer.essay_content.includes('![')) && (
+                    <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-xl animate-fadeIn">
+                      <div className="text-xs font-bold text-sky-400 mb-1.5 flex items-center gap-1.5">
+                        <Eye className="w-3.5 h-3.5" /> Xem trước định dạng bài làm (Mã Code / Công thức / Hình ảnh):
+                      </div>
+                      <div className="text-sm text-slate-200">
+                        <MathContent content={currentAnswer.essay_content} />
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : currentQ.question_type === 'true_false' ? (
                 /* BẢNG CHỌN ĐÚNG / SAI 4 Ý THEO CHUẨN BGDĐT 2025 */

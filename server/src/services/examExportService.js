@@ -107,26 +107,121 @@ class ExamExportService {
       return `<w:p>${alignXml}<w:r>${rPrXml}<w:t xml:space="preserve">${escapeXml(text)}</w:t></w:r></w:p>`;
     };
 
-    // Xử lý văn bản có chứa markdown image: ![alt](url)
-    const processContentWithImages = (content, prefix = '', isBold = false) => {
-      const imgRegex = /!\[.*?\]\((.*?)\)/g;
-      const xmlBlocks = [];
-      let lastIndex = 0;
-      let match;
-
-      while ((match = imgRegex.exec(content)) !== null) {
-        const textBefore = content.substring(lastIndex, match.index).trim();
-        if (textBefore || prefix) {
-          xmlBlocks.push(p(`${prefix}${textBefore}`, isBold));
-          prefix = ''; // Đã chèn prefix ở đoạn đầu
+    // Helper: Định dạng mã code nội dòng (Inline Code `...`)
+    const formatRunsWithInlineCode = (text, isBold = false, isItalic = false) => {
+      const parts = text.split(/(`[^`\n]+`)/g);
+      let xml = '';
+      for (const part of parts) {
+        if (!part) continue;
+        if (part.startsWith('`') && part.endsWith('`') && part.length >= 2) {
+          const codeContent = part.slice(1, -1);
+          xml += `<w:r>
+            <w:rPr>
+              <w:rFonts w:ascii="Consolas" w:hAnsi="Consolas"/>
+              <w:sz w:val="19"/>
+              <w:color w:val="0369A1"/>
+              <w:shd w:val="clear" w:color="auto" w:fill="F1F5F9"/>
+            </w:rPr>
+            <w:t xml:space="preserve">${escapeXml(codeContent)}</w:t>
+          </w:r>`;
+        } else {
+          const rPrXml = (isBold || isItalic) ? `<w:rPr>${isBold ? '<w:b/>' : ''}${isItalic ? '<w:i/>' : ''}</w:rPr>` : '';
+          xml += `<w:r>${rPrXml}<w:t xml:space="preserve">${escapeXml(part)}</w:t></w:r>`;
         }
-        xmlBlocks.push(embedImage(match[1]));
-        lastIndex = imgRegex.lastIndex;
+      }
+      return xml;
+    };
+
+    const pWithRuns = (runsXml, align = 'left') => {
+      const alignXml = align !== 'left' ? `<w:pPr><w:jc w:val="${align}"/></w:pPr>` : '';
+      return `<w:p>${alignXml}${runsXml}</w:p>`;
+    };
+
+    // Khối mã nguồn Code Block đẹp chuẩn Microsoft Word (Consolas, Shading, Left Border)
+    const codeBlockXml = (codeText, lang = 'python') => {
+      const lines = codeText.split(/\r?\n/);
+      return lines.map(line => {
+        return `<w:p>
+  <w:pPr>
+    <w:pBdr>
+      <w:left w:val="single" w:sz="18" w:space="8" w:color="0284C7"/>
+    </w:pBdr>
+    <w:shd w:val="clear" w:color="auto" w:fill="F1F5F9"/>
+    <w:ind w:left="360" w:right="360"/>
+    <w:spacing w:before="20" w:after="20" w:line="240" w:lineRule="auto"/>
+  </w:pPr>
+  <w:r>
+    <w:rPr>
+      <w:rFonts w:ascii="Consolas" w:hAnsi="Consolas"/>
+      <w:sz w:val="19"/>
+      <w:color w:val="0F172A"/>
+    </w:rPr>
+    <w:t xml:space="preserve">${escapeXml(line || ' ')}</w:t>
+  </w:r>
+</w:p>`;
+      }).join('\n');
+    };
+
+    // Xử lý văn bản có chứa Khối Code (```...```), Inline Code (`...`) và Hình ảnh (![alt](url))
+    const processContent = (content, prefix = '', isBold = false) => {
+      if (!content && !prefix) return '';
+      const tokenRegex = /(```(?:[a-zA-Z0-9_-]+)?[\s\S]*?```|!\[.*?\]\(.*?\))/g;
+      const parts = (content || '').split(tokenRegex);
+      const xmlBlocks = [];
+
+      let hasInsertedPrefix = false;
+
+      for (const part of parts) {
+        if (!part) continue;
+
+        // 1. Code Block: ```lang\n...```
+        if (part.startsWith('```') && part.endsWith('```') && part.length >= 6) {
+          if (prefix && !hasInsertedPrefix) {
+            xmlBlocks.push(p(prefix, isBold));
+            hasInsertedPrefix = true;
+          }
+          const inner = part.slice(3, -3);
+          const firstLineBreak = inner.indexOf('\n');
+          let lang = 'python';
+          let codeBody = inner;
+          if (firstLineBreak !== -1) {
+            const firstLine = inner.slice(0, firstLineBreak).trim();
+            if (firstLine && /^[a-zA-Z0-9_-]+$/.test(firstLine)) {
+              lang = firstLine;
+              codeBody = inner.slice(firstLineBreak + 1);
+            }
+          }
+          codeBody = codeBody.replace(/^\r?\n/, '').replace(/\r?\n$/, '');
+          xmlBlocks.push(codeBlockXml(codeBody, lang));
+        }
+        // 2. Image: ![alt](url)
+        else if (part.startsWith('![') && part.includes('](') && part.endsWith(')')) {
+          if (prefix && !hasInsertedPrefix) {
+            xmlBlocks.push(p(prefix, isBold));
+            hasInsertedPrefix = true;
+          }
+          const match = part.match(/^!\[(.*?)\]\((.*?)\)$/);
+          if (match) {
+            xmlBlocks.push(embedImage(match[2]));
+          }
+        }
+        // 3. Văn bản thông thường (có thể có \n và `inline code`)
+        else {
+          const lines = part.split(/\r?\n/);
+          for (let li = 0; li < lines.length; li++) {
+            const line = lines[li];
+            if (li === 0 && prefix && !hasInsertedPrefix) {
+              xmlBlocks.push(pWithRuns(formatRunsWithInlineCode(`${prefix}${line}`, isBold)));
+              hasInsertedPrefix = true;
+            } else if (line.trim().length > 0) {
+              xmlBlocks.push(pWithRuns(formatRunsWithInlineCode(line, isBold)));
+            }
+          }
+        }
       }
 
-      const textRemaining = content.substring(lastIndex).trim();
-      if (textRemaining || prefix) {
-        xmlBlocks.push(p(`${prefix}${textRemaining}`, isBold));
+      if (prefix && !hasInsertedPrefix) {
+        xmlBlocks.unshift(p(prefix, isBold));
       }
 
       return xmlBlocks.length > 0 ? xmlBlocks.join('\n') : p(prefix, isBold);
@@ -154,10 +249,10 @@ class ExamExportService {
       paragraphs.push(emptyLine());
 
       for (const q of part1) {
-        paragraphs.push(processContentWithImages(q.content, `Câu ${qCounter}: `, true));
+        paragraphs.push(processContent(q.content, `Câu ${qCounter}: `, true));
         const opts = Array.isArray(q.options) ? q.options : [];
         for (const opt of opts) {
-          paragraphs.push(processContentWithImages(opt.text, `   ${opt.id}. `));
+          paragraphs.push(processContent(opt.text, `   ${opt.id}. `));
         }
         paragraphs.push(emptyLine());
         qCounter++;
@@ -172,11 +267,11 @@ class ExamExportService {
       paragraphs.push(emptyLine());
 
       for (const q of part2) {
-        paragraphs.push(processContentWithImages(q.content, `Câu ${qCounter}: `, true));
+        paragraphs.push(processContent(q.content, `Câu ${qCounter}: `, true));
         const subKeys = ['a', 'b', 'c', 'd'];
         const opts = Array.isArray(q.options) && q.options.length > 0 ? q.options : subKeys.map(k => ({ id: k, text: '' }));
         for (const opt of opts) {
-          paragraphs.push(processContentWithImages(opt.text, `   ${opt.id.toLowerCase()}) `));
+          paragraphs.push(processContent(opt.text, `   ${opt.id.toLowerCase()}) `));
         }
         paragraphs.push(emptyLine());
         qCounter++;
@@ -191,7 +286,7 @@ class ExamExportService {
 
       for (const q of part3) {
         paragraphs.push(p(`Câu ${qCounter} (Tự luận - ${q.max_score || 1.0} điểm):`, true));
-        paragraphs.push(processContentWithImages(q.content));
+        paragraphs.push(processContent(q.content));
         paragraphs.push(p('Bài làm:'));
         paragraphs.push(p('..........................................................................................................................................................................'));
         paragraphs.push(p('..........................................................................................................................................................................'));
@@ -244,7 +339,7 @@ class ExamExportService {
       paragraphs.push(p('III. HƯỚNG DẪN CHẤM PHẦN III (TỰ LUẬN):', true));
       for (const q of part3) {
         paragraphs.push(p(`Câu ${ansCounter} (Tối đa ${q.max_score || 1.0} điểm):`, true));
-        paragraphs.push(processContentWithImages(q.rubric_guide || 'Chấm điểm theo nội dung trả lời đúng trọng tâm câu hỏi của thí sinh.'));
+        paragraphs.push(processContent(q.rubric_guide || 'Chấm điểm theo nội dung trả lời đúng trọng tâm câu hỏi của thí sinh.'));
         paragraphs.push(emptyLine());
         ansCounter++;
       }

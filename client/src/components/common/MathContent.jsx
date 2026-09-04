@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import katex from 'katex';
 import { ZoomIn, X } from 'lucide-react';
+import CodeBlock from './CodeBlock';
 
 /**
  * MathContent Component
- * Render công thức toán học KaTeX ($...$ và $$...$$) và hình ảnh Markdown (![alt](url))
+ * Render công thức toán học KaTeX ($...$ và $$...$$), hình ảnh Markdown (![alt](url)),
+ * và khối mã nguồn Tin học (Python, HTML...) với Syntax Highlighting.
  * Hoạt động 100% Offline trên mạng LAN không cần kết nối Internet.
  */
 export default function MathContent({ content = '', className = '', zoomable = true }) {
@@ -12,17 +14,64 @@ export default function MathContent({ content = '', className = '', zoomable = t
 
   if (!content) return null;
 
-  // Tách nội dung thành các token: Display Math ($$...$$), Ảnh (![alt](url)), Inline Math ($...$), Xuống dòng (\n)
-  const tokenRegex = /(\$\$[\s\S]+?\$\$|!\[.*?\]\(.*?\)|\$(?:\\\$|[^\$\n])+?\$|\n)/g;
+  // Tách nội dung thành các token:
+  // 1. Khối Code: ```lang\n...```
+  // 2. Mã nội dòng: `code`
+  // 3. Display Math: $$...$$
+  // 4. Ảnh: ![alt](url)
+  // 5. Inline Math: $...$
+  // 6. Xuống dòng: \n
+  const tokenRegex = /(```(?:[a-zA-Z0-9_-]+)?[\s\S]*?```|`[^`\n]+`|\$\$[\s\S]+?\$\$|!\[.*?\]\(.*?\)|\$(?:\\\$|[^\$\n])+?\$|\n)/g;
   const parts = content.split(tokenRegex);
 
   return (
     <>
-      <span className={`inline-block math-content ${className}`}>
+      <div className={`math-content inline-block w-full text-inherit ${className}`}>
         {parts.map((part, index) => {
           if (!part) return null;
 
-          // 1. Display Math: $$ ... $$
+          // 1. Khối Mã Nguồn (Code Block): ```lang\n...```
+          if (part.startsWith('```') && part.endsWith('```') && part.length >= 6) {
+            const inner = part.slice(3, -3);
+            const firstLineBreak = inner.indexOf('\n');
+            let lang = 'python';
+            let codeBody = inner;
+
+            if (firstLineBreak !== -1) {
+              const firstLine = inner.slice(0, firstLineBreak).trim();
+              if (firstLine && /^[a-zA-Z0-9_-]+$/.test(firstLine)) {
+                lang = firstLine;
+                codeBody = inner.slice(firstLineBreak + 1);
+              }
+            }
+
+            // Bỏ dòng trống đầu và cuối nếu có
+            codeBody = codeBody.replace(/^\r?\n/, '').replace(/\r?\n$/, '');
+
+            return (
+              <CodeBlock
+                key={index}
+                code={codeBody}
+                language={lang}
+                showLineNumbers={true}
+              />
+            );
+          }
+
+          // 2. Mã nội dòng (Inline Code): `code`
+          if (part.startsWith('`') && part.endsWith('`') && part.length >= 2) {
+            const inlineCode = part.slice(1, -1);
+            return (
+              <code
+                key={index}
+                className="px-1.5 py-0.5 mx-0.5 rounded bg-slate-800/90 text-sky-300 font-mono text-xs border border-slate-700 font-semibold"
+              >
+                {inlineCode}
+              </code>
+            );
+          }
+
+          // 3. Display Math: $$ ... $$
           if (part.startsWith('$$') && part.endsWith('$$') && part.length >= 4) {
             const math = part.slice(2, -2).trim();
             try {
@@ -31,9 +80,9 @@ export default function MathContent({ content = '', className = '', zoomable = t
                 throwOnError: false
               });
               return (
-                <span
+                <div
                   key={index}
-                  className="block my-2 text-center overflow-x-auto py-1"
+                  className="my-2 text-center overflow-x-auto py-1"
                   dangerouslySetInnerHTML={{ __html: html }}
                 />
               );
@@ -42,14 +91,14 @@ export default function MathContent({ content = '', className = '', zoomable = t
             }
           }
 
-          // 2. Markdown Image: ![alt](url)
+          // 4. Markdown Image: ![alt](url)
           if (part.startsWith('![') && part.includes('](') && part.endsWith(')')) {
             const imgMatch = part.match(/^!\[(.*?)\]\((.*?)\)$/);
             if (imgMatch) {
               const alt = imgMatch[1] || 'Hình ảnh câu hỏi';
               const src = imgMatch[2];
               return (
-                <span key={index} className="block my-2 text-center group relative inline-block">
+                <div key={index} className="my-2 text-center group relative inline-block">
                   <img
                     src={src}
                     alt={alt}
@@ -69,12 +118,12 @@ export default function MathContent({ content = '', className = '', zoomable = t
                       Phóng to
                     </span>
                   )}
-                </span>
+                </div>
               );
             }
           }
 
-          // 3. Inline Math: $ ... $
+          // 5. Inline Math: $ ... $
           if (part.startsWith('$') && part.endsWith('$') && part.length >= 2) {
             const math = part.slice(1, -1).trim();
             try {
@@ -94,15 +143,15 @@ export default function MathContent({ content = '', className = '', zoomable = t
             }
           }
 
-          // 4. Line break: \n
+          // 6. Line break: \n
           if (part === '\n') {
             return <br key={index} />;
           }
 
-          // 5. Plain text
+          // 7. Plain text
           return <React.Fragment key={index}>{part}</React.Fragment>;
         })}
-      </span>
+      </div>
 
       {/* Modal phóng to ảnh */}
       {zoomedImage && (

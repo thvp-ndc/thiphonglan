@@ -92,17 +92,48 @@ class WordExamParser {
     const docXml = await docXmlFile.async('text');
     const dom = new DOMParser().parseFromString(docXml, 'text/xml');
 
-    const paragraphs = [];
+    const rawParagraphs = [];
     const bodyElements = dom.getElementsByTagName('w:body');
     const root = bodyElements.length > 0 ? bodyElements[0] : dom.documentElement;
 
-    this.collectParagraphs(root, paragraphs, relMap);
+    this.collectParagraphs(root, rawParagraphs, relMap);
+    const paragraphs = this.processCollectedParagraphs(rawParagraphs);
 
     const fullText = paragraphs.join('\n');
     return this.parseExamText(fullText);
   }
 
-  collectParagraphs(node, paragraphs, relMap) {
+  isCodeParagraph(pNode) {
+    if (!pNode || pNode.nodeType !== 1) return false;
+
+    // 1. Kiểm tra <w:pPr> -> <w:pStyle w:val="..."/>
+    const pPr = pNode.getElementsByTagName('w:pPr')[0];
+    if (pPr) {
+      const pStyle = pPr.getElementsByTagName('w:pStyle')[0];
+      if (pStyle) {
+        const val = pStyle.getAttribute('w:val') || pStyle.getAttribute('val') || '';
+        if (/code|program|listing|pre|html|python|consolas/i.test(val)) return true;
+      }
+    }
+
+    // 2. Kiểm tra font Consolas/Courier trong các run <w:r> hoặc <w:rFonts>
+    const rFontsList = pNode.getElementsByTagName('w:rFonts');
+    if (rFontsList.length > 0) {
+      for (let i = 0; i < rFontsList.length; i++) {
+        const rf = rFontsList[i];
+        const ascii = rf.getAttribute('w:ascii') || rf.getAttribute('ascii') || '';
+        const hAnsi = rf.getAttribute('w:hAnsi') || rf.getAttribute('hAnsi') || '';
+        if (/consolas|courier|monospace|fira|source code|lucida console/i.test(ascii) ||
+            /consolas|courier|monospace|fira|source code|lucida console/i.test(hAnsi)) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  collectParagraphs(node, rawParagraphs, relMap) {
     if (!node) return;
 
     for (let child = node.firstChild; child; child = child.nextSibling) {
@@ -110,9 +141,10 @@ class WordExamParser {
       const tag = child.localName || child.nodeName.split(':').pop();
 
       if (tag === 'p') {
-        const pText = this.extractNodeText(child, relMap).trim();
-        if (pText) {
-          paragraphs.push(pText);
+        const isCode = this.isCodeParagraph(child);
+        const pText = this.extractNodeText(child, relMap).trimEnd();
+        if (pText.trim()) {
+          rawParagraphs.push({ text: pText, isCode });
         }
       } else if (tag === 'tbl') {
         // Hỗ trợ duyệt qua bảng
@@ -122,15 +154,51 @@ class WordExamParser {
           for (let c = 0; c < cells.length; c++) {
             const cellPs = cells[c].getElementsByTagName('w:p');
             for (let cp = 0; cp < cellPs.length; cp++) {
-              const cpText = this.extractNodeText(cellPs[cp], relMap).trim();
-              if (cpText) paragraphs.push(cpText);
+              const isCode = this.isCodeParagraph(cellPs[cp]);
+              const cpText = this.extractNodeText(cellPs[cp], relMap).trimEnd();
+              if (cpText.trim()) rawParagraphs.push({ text: cpText, isCode });
             }
           }
         }
       } else {
-        this.collectParagraphs(child, paragraphs, relMap);
+        this.collectParagraphs(child, rawParagraphs, relMap);
       }
     }
+  }
+
+  processCollectedParagraphs(rawParagraphs) {
+    const finalParagraphs = [];
+    let codeBuffer = [];
+
+    const flushCodeBuffer = () => {
+      if (codeBuffer.length === 0) return;
+      const joinedCode = codeBuffer.join('\n');
+      codeBuffer = [];
+
+      // Nếu đã có dấu bọc ``` thì không bọc lặp lại
+      if (joinedCode.trim().startsWith('```') && joinedCode.trim().endsWith('```')) {
+        finalParagraphs.push(joinedCode);
+        return;
+      }
+
+      // Xác định ngôn ngữ: HTML hay Python
+      const isHtml = /<!DOCTYPE|<html|<body|<div|<table|<tr|<td|<form|<style|<script|<\//i.test(joinedCode);
+      const lang = isHtml ? 'html' : 'python';
+      finalParagraphs.push(`\`\`\`${lang}\n${joinedCode}\n\`\`\``);
+    };
+
+    for (let i = 0; i < rawParagraphs.length; i++) {
+      const item = rawParagraphs[i];
+      if (item.isCode) {
+        codeBuffer.push(item.text);
+      } else {
+        flushCodeBuffer();
+        finalParagraphs.push(item.text);
+      }
+    }
+    flushCodeBuffer();
+
+    return finalParagraphs;
   }
 
   extractNodeText(node, relMap) {
@@ -158,7 +226,7 @@ class WordExamParser {
     }
 
     if (tag === 'tab') {
-      return ' ';
+      return '    '; // 4 dấu cách cho tab thụt lề
     }
 
     if (tag === 'br' || tag === 'cr') {
@@ -196,46 +264,86 @@ class WordExamParser {
   }
 
   parseExamText(text) {
-    const rawLines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    const rawLines = text.split(/\r?\n/).map(l => l.trimEnd()).filter(l => l.trim().length > 0);
     if (rawLines.length === 0) {
       throw new Error('File Word rỗng hoặc không có văn bản');
     }
 
-    // Tiền xử lý: nếu 1 dòng chứa cả 4 đáp án A. ... B. ... C. ... D. ... thì tách ra từng dòng
+    // Tiền xử lý: nếu 1 dòng chứa cả 4 đáp án A. ... B. ... C. ... D. ... thì tách ra từng dòng (ngoại trừ khối code)
     const lines = [];
+    let insidePreFence = false;
     for (const line of rawLines) {
+      if (line.trim().startsWith('```')) {
+        insidePreFence = !insidePreFence;
+        lines.push(line);
+        continue;
+      }
+      if (insidePreFence) {
+        lines.push(line);
+        continue;
+      }
       const inlineSplit = this.splitInlineOptions(line);
       lines.push(...inlineSplit);
     }
 
     let examTitle = 'Đề Thi Nhập Từ File Word';
-    if (lines[0] && !lines[0].match(/^(?:Câu|CÂU|Bài|BÀI)\s+\d+/i)) {
+    if (lines[0] && !lines[0].match(/^(?:Câu|CÂU|Bài|BÀI)\s+\d+/i) && !lines[0].startsWith('```')) {
       examTitle = lines[0].replace(/^[\s#*_-]+/, '').trim();
     }
 
     const questions = [];
     let currentQ = null;
     let currentSection = 'single_choice'; // 'single_choice' | 'true_false' | 'essay'
+    let insideCodeFence = false;
 
     // Regex patterns for section headers
-    const part1Regex = /^(?:PHẦN|Phần)\s*(?:I|1|A)?[.:\s-]*(?:CÂU\s+(?:HỎI\s+)?)?(?:TRẮC\s*NGHIỆM\s+)?(?:NHIỀU|NHIEU)/i;
-    const part2Regex = /^(?:PHẦN|Phần)\s*(?:II|2|B)?[.:\s-]*(?:CÂU\s+(?:HỎI\s+)?)?(?:TRẮC\s*NGHIỆM\s+)?(?:ĐÚNG|DUNG)/i;
-    const part3Regex = /^(?:PHẦN|Phần)\s*(?:III|3|C)?[.:\s-]*(?:CÂU\s+(?:HỎI\s+)?)?(?:TỰ|TƯ|TU)\s*LUẬN/i;
+    const part1Regex = /^\s*(?:PHẦN|Phần)\s*(?:I|1|A)?[.:\s-]*(?:CÂU\s+(?:HỎI\s+)?)?(?:TRẮC\s*NGHIỆM\s+)?(?:NHIỀU|NHIEU)/i;
+    const part2Regex = /^\s*(?:PHẦN|Phần)\s*(?:II|2|B)?[.:\s-]*(?:CÂU\s+(?:HỎI\s+)?)?(?:TRẮC\s*NGHIỆM\s+)?(?:ĐÚNG|DUNG)/i;
+    const part3Regex = /^\s*(?:PHẦN|Phần)\s*(?:III|3|C)?[.:\s-]*(?:CÂU\s+(?:HỎI\s+)?)?(?:TỰ|TƯ|TU)\s*LUẬN/i;
 
-    const questionHeaderRegex = /^(?:Câu|CÂU|Bài|BÀI)\s*(\d+)[\s:.-]+(.*)/i;
+    const questionHeaderRegex = /^\s*(?:Câu|CÂU|Bài|BÀI)\s*(\d+)[\s:.-]+(.*)/i;
     
     // MCQ Options A, B, C, D (Upper case)
-    const mcqOptionRegex = /^([*]?[A-D][*]?|[A-D]\*|\([A-D]\)|\[[A-D]\])[\s:.)-]+(.*)/;
+    const mcqOptionRegex = /^\s*([*]?[A-D][*]?|[A-D]\*|\([A-D]\)|\[[A-D]\])[\s:.)-]+(.*)/;
     
     // True/False Sub-items a, b, c, d (Lower case)
-    const tfSubItemRegex = /^([*]?[a-d][*]?|[a-d]\*|\([a-d]\)|\[[a-d]\])[\s:.)-]+(.*)/;
+    const tfSubItemRegex = /^\s*([*]?[a-d][*]?|[a-d]\*|\([a-d]\)|\[[a-d]\])[\s:.)-]+(.*)/;
     
     // Answer tags
-    const answerTagRegex = /(?:Đáp án|ĐA|Đáp án đúng|ĐÁP ÁN)[\s:.-]*(.*)/i;
+    const answerTagRegex = /^\s*(?:Đáp án|ĐA|Đáp án đúng|ĐÁP ÁN)[\s:.-]*(.*)/i;
     const scoreRegex = /\((\d+(?:[,.]\d+)?)\s*(?:điểm|đ|d)\)/i;
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
+
+      // 0. Xử lý khối mã nguồn (Code Fence)
+      if (line.trim().startsWith('```')) {
+        insideCodeFence = !insideCodeFence;
+        if (currentQ) {
+          if (currentQ.options.length === 0 && !currentQ.rubric_guide) {
+            currentQ.content += (currentQ.content ? '\n' : '') + line;
+          } else if (currentQ.options.length > 0 && !currentQ.rubric_guide && currentQ.question_type !== 'essay') {
+            const lastOpt = currentQ.options[currentQ.options.length - 1];
+            lastOpt.text += (lastOpt.text ? '\n' : '') + line;
+          } else if (currentQ.rubric_guide) {
+            currentQ.rubric_guide += line + '\n';
+          }
+        }
+        continue;
+      }
+
+      // Khi đang nằm trong khối code, giữ nguyên toàn bộ ký tự và thụt lề, không check pattern
+      if (insideCodeFence && currentQ) {
+        if (currentQ.options.length === 0 && !currentQ.rubric_guide) {
+          currentQ.content += (currentQ.content ? '\n' : '') + line;
+        } else if (currentQ.options.length > 0 && !currentQ.rubric_guide && currentQ.question_type !== 'essay') {
+          const lastOpt = currentQ.options[currentQ.options.length - 1];
+          lastOpt.text += (lastOpt.text ? '\n' : '') + line;
+        } else if (currentQ.rubric_guide) {
+          currentQ.rubric_guide += line + '\n';
+        }
+        continue;
+      }
 
       // Check section transitions
       if (part3Regex.test(line)) {
@@ -431,6 +539,10 @@ class WordExamParser {
   }
 
   splitInlineOptions(line) {
+    if (line.trim().startsWith('```') || line.startsWith('    ') || line.startsWith('\t')) {
+      return [line];
+    }
+
     // Tách dòng có nhiều phương án: "A. ... B. ... C. ... D. ..."
     // Kiểm tra xem dòng có chứa ít nhất 2 phương án trở lên
     const pattern = /(?:^|\s+)((?:[*]?)[A-D][*]?|[A-D]\*|\([A-D]\)|\[[A-D]\])[\s:.)-]+/g;
@@ -447,6 +559,59 @@ class WordExamParser {
     }
 
     return [line];
+  }
+
+  autoFenceCodeInText(text) {
+    if (!text || text.includes('```')) return text;
+
+    // 1. Phát hiện khối mã nguồn HTML
+    const htmlBlockRegex = /(<(?:table|form|html|body|div|ul|ol)[\s\S]*?<\/(?:table|form|html|body|div|ul|ol)>)/i;
+    if (htmlBlockRegex.test(text)) {
+      return text.replace(htmlBlockRegex, '\n```html\n$1\n```\n');
+    }
+
+    // 2. Phát hiện khối mã nguồn Python
+    const lines = text.split('\n');
+    const newLines = [];
+    let pyBlock = [];
+    let inPy = false;
+
+    const flushPy = () => {
+      if (pyBlock.length > 0) {
+        if (pyBlock.length >= 2 || /^\s*(?:def |class |for .* in |while |import |from .* import )/i.test(pyBlock[0])) {
+          newLines.push('```python');
+          newLines.push(...pyBlock);
+          newLines.push('```');
+        } else {
+          newLines.push(...pyBlock);
+        }
+        pyBlock = [];
+      }
+      inPy = false;
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const isPyStart = /^\s*(?:def\s+[a-zA-Z0-9_]+\s*\(|class\s+[a-zA-Z0-9_]+|for\s+[a-zA-Z0-9_]+\s+in\s+|while\s+|import\s+[a-zA-Z0-9_]+|from\s+[a-zA-Z0-9_]+\s+import)/.test(line);
+      const isIndented = /^(?: {2,}|\t)/.test(line);
+      const isPyKeyword = /^\s*(?:if\s+.*:|elif\s+.*:|else:|return\b|print\(|input\()/.test(line);
+
+      if (isPyStart) {
+        if (!inPy) {
+          flushPy();
+          inPy = true;
+        }
+        pyBlock.push(line);
+      } else if (inPy && (isIndented || isPyKeyword || line.trim() === '')) {
+        pyBlock.push(line);
+      } else {
+        flushPy();
+        newLines.push(line);
+      }
+    }
+    flushPy();
+
+    return newLines.join('\n');
   }
 
   finalizeQuestion(q, questionsList) {
@@ -474,8 +639,8 @@ class WordExamParser {
       }
     }
 
-    q.content = q.content.trim();
-    if (q.rubric_guide) q.rubric_guide = q.rubric_guide.trim();
+    q.content = this.autoFenceCodeInText(q.content.trim());
+    if (q.rubric_guide) q.rubric_guide = this.autoFenceCodeInText(q.rubric_guide.trim());
 
     questionsList.push(q);
   }

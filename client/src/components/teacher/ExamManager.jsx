@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, FileText, CheckCircle2, BookOpen, Clock, Shuffle, HelpCircle, Edit2, Play, Lock, Upload, FileUp, AlertCircle, Users, Download, Image as ImageIcon, Sigma, Eye } from 'lucide-react';
+import { Plus, Trash2, FileText, CheckCircle2, BookOpen, Clock, Shuffle, HelpCircle, Edit2, Play, Lock, Upload, FileUp, AlertCircle, Users, Download, Image as ImageIcon, Sigma, Eye, Code2 } from 'lucide-react';
 import SessionStudentsModal from './SessionStudentsModal';
 import MathToolbarModal from '../common/MathToolbarModal';
+import CodeToolbarModal from '../common/CodeToolbarModal';
 import MathContent from '../common/MathContent';
 
 export default function ExamManager({ onSelectSessionForMonitor, onSelectSessionForResults }) {
@@ -23,11 +24,37 @@ export default function ExamManager({ onSelectSessionForMonitor, onSelectSession
   });
   const [autoSyncScore, setAutoSyncScore] = useState(true);
 
-  // Math & Image Editing State
+  // Math & Image & Code Editing State
   const [mathModalTarget, setMathModalTarget] = useState(null); // { qIndex, type: 'content'|'option'|'rubric', optId?: string }
+  const [codeModalTarget, setCodeModalTarget] = useState(null); // { qIndex, type: 'content'|'option'|'rubric', optId?: string }
   const [imageTarget, setImageTarget] = useState(null);
   const [uploadingImage, setUploadingImage] = useState(false);
   const imageFileInputRef = useRef(null);
+
+  const handleInsertCode = (codeStr) => {
+    if (!codeModalTarget) return;
+    insertTextToTarget(codeModalTarget, codeStr);
+  };
+
+  const handleKeyDownTab = (e, qIndex, field, optId) => {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const start = e.target.selectionStart;
+      const end = e.target.selectionEnd;
+      const value = e.target.value;
+      const newValue = value.substring(0, start) + '    ' + value.substring(end);
+      if (field === 'content') {
+        updateQuestion(qIndex, 'content', newValue);
+      } else if (field === 'rubric_guide') {
+        updateQuestion(qIndex, 'rubric_guide', newValue);
+      } else if (field === 'option') {
+        updateOptionText(qIndex, optId, newValue);
+      }
+      setTimeout(() => {
+        e.target.selectionStart = e.target.selectionEnd = start + 4;
+      }, 0);
+    }
+  };
 
   const insertTextToTarget = (target, textToInsert) => {
     if (!target) return;
@@ -1136,11 +1163,20 @@ export default function ExamManager({ onSelectSessionForMonitor, onSelectSession
                       </div>
                     </div>
 
-                    {/* Nội dung câu hỏi: KÉO DÃN ĐƯỢC (RESIZABLE) CÓ THANH CÔNG CỤ TOÁN & ẢNH */}
+                    {/* Nội dung câu hỏi: KÉO DÃN ĐƯỢC (RESIZABLE) CÓ THANH CÔNG CỤ TOÁN, ẢNH & CODE */}
                     <div className="space-y-2">
                       <div className="flex items-center justify-between pb-1">
                         <label className="text-xs font-semibold text-slate-300">Nội dung câu hỏi:</label>
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setCodeModalTarget({ qIndex, type: 'content' })}
+                            className="px-2.5 py-1 bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-800/80 rounded-lg text-xs font-semibold flex items-center gap-1 transition shadow-sm"
+                            title="Chèn đoạn mã nguồn Python / HTML có tô màu cú pháp và số dòng"
+                          >
+                            <Code2 className="w-3.5 h-3.5 text-emerald-400" />
+                            Mã Code
+                          </button>
                           <button
                             type="button"
                             onClick={() => setMathModalTarget({ qIndex, type: 'content' })}
@@ -1159,27 +1195,28 @@ export default function ExamManager({ onSelectSessionForMonitor, onSelectSession
                             <ImageIcon className="w-3.5 h-3.5 text-sky-400" />
                             Thêm ảnh
                           </button>
-                          <span className="text-[11px] text-slate-500 italic hidden sm:inline">(Dán ảnh Ctrl+V)</span>
+                          <span className="text-[11px] text-slate-500 italic hidden sm:inline">(Tab thụt lề • Ctrl+V dán ảnh)</span>
                         </div>
                       </div>
 
                       <textarea
                         value={q.content}
                         onChange={e => updateQuestion(qIndex, 'content', e.target.value)}
+                        onKeyDown={e => handleKeyDownTab(e, qIndex, 'content')}
                         onPaste={e => handlePasteInField(e, { qIndex, type: 'content' })}
-                        placeholder={q.question_type === 'essay' ? 'Nhập nội dung đề bài tự luận (hỗ trợ công thức $...$ và dán ảnh Ctrl+V)...' : 'Nhập nội dung câu hỏi (hỗ trợ công thức $...$ và dán ảnh Ctrl+V)...'}
+                        placeholder={q.question_type === 'essay' ? 'Nhập nội dung đề bài tự luận (hỗ trợ công thức $...$, khối code ```python/html và dán ảnh Ctrl+V)...' : 'Nhập nội dung câu hỏi (hỗ trợ công thức $...$, khối code ```python/html và dán ảnh Ctrl+V)...'}
                         rows={q.question_type === 'essay' ? 4 : 2}
-                        style={{ minHeight: q.question_type === 'essay' ? '120px' : '70px', resize: 'vertical' }}
+                        style={{ minHeight: q.question_type === 'essay' ? '120px' : '70px', resize: 'vertical', tabSize: 4 }}
                         className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white text-sm focus:border-sky-500 focus:outline-none leading-relaxed"
                         required
                       />
 
                       {/* Khung Xem Trước Thời Gian Thực (Live Preview) cho Câu Hỏi */}
-                      {q.content && (q.content.includes('$') || q.content.includes('![')) && (
+                      {q.content && (q.content.includes('$') || q.content.includes('![') || q.content.includes('```') || q.content.includes('`')) && (
                         <div className="p-3 bg-slate-950/80 border border-slate-700/80 rounded-xl shadow-inner animate-fadeIn">
                           <div className="flex items-center gap-1.5 text-[11px] font-bold text-sky-400 mb-1.5 border-b border-slate-800/80 pb-1">
                             <Eye className="w-3.5 h-3.5" />
-                            <span>Xem trước hiển thị (Live Preview KaTeX & Ảnh):</span>
+                            <span>Xem trước hiển thị (Live Preview KaTeX, Code & Ảnh):</span>
                           </div>
                           <div className="text-sm text-slate-100 leading-relaxed overflow-x-auto">
                             <MathContent content={q.content} />
@@ -1196,6 +1233,14 @@ export default function ExamManager({ onSelectSessionForMonitor, onSelectSession
                             <HelpCircle className="w-3.5 h-3.5" /> Barem Chấm & Đáp Án Mẫu (Dành cho Giáo Viên):
                           </label>
                           <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setCodeModalTarget({ qIndex, type: 'rubric' })}
+                              className="px-2 py-0.5 bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-800 rounded text-[11px] font-semibold flex items-center gap-1 transition"
+                              title="Chèn mã code Python / HTML vào barem chấm"
+                            >
+                              <Code2 className="w-3 h-3" /> Mã Code
+                            </button>
                             <button
                               type="button"
                               onClick={() => setMathModalTarget({ qIndex, type: 'rubric' })}
@@ -1218,15 +1263,16 @@ export default function ExamManager({ onSelectSessionForMonitor, onSelectSession
                         <textarea
                           value={q.rubric_guide}
                           onChange={e => updateQuestion(qIndex, 'rubric_guide', e.target.value)}
+                          onKeyDown={e => handleKeyDownTab(e, qIndex, 'rubric_guide')}
                           onPaste={e => handlePasteInField(e, { qIndex, type: 'rubric' })}
-                          placeholder="Nhập tiêu chí chấm, các ý cần có, barem điểm chi tiết (hỗ trợ công thức $...$ và ảnh)..."
+                          placeholder="Nhập tiêu chí chấm, các ý cần có, barem điểm chi tiết (hỗ trợ công thức $...$, khối code ```python/html và ảnh)..."
                           rows={4}
-                          style={{ minHeight: '120px', resize: 'vertical' }}
+                          style={{ minHeight: '120px', resize: 'vertical', tabSize: 4 }}
                           className="w-full bg-slate-950/80 border border-slate-700 rounded-lg p-2.5 text-amber-200 text-xs focus:outline-none leading-relaxed"
                         />
-                        {q.rubric_guide && (q.rubric_guide.includes('$') || q.rubric_guide.includes('![')) && (
+                        {q.rubric_guide && (q.rubric_guide.includes('$') || q.rubric_guide.includes('![') || q.rubric_guide.includes('```') || q.rubric_guide.includes('`')) && (
                           <div className="p-2.5 bg-amber-950/30 border border-amber-800/40 rounded-lg text-xs text-amber-200 animate-fadeIn">
-                            <span className="font-bold text-[10px] text-amber-400 block mb-1">Xem trước barem:</span>
+                            <span className="font-bold text-[10px] text-amber-400 block mb-1">Xem trước barem (KaTeX, Code & Ảnh):</span>
                             <MathContent content={q.rubric_guide} />
                           </div>
                         )}
@@ -1268,6 +1314,14 @@ export default function ExamManager({ onSelectSessionForMonitor, onSelectSession
                                   />
                                   <button
                                     type="button"
+                                    onClick={() => setCodeModalTarget({ qIndex, type: 'option', optId: letter })}
+                                    className="p-1.5 bg-slate-800 hover:bg-emerald-900/60 text-slate-300 hover:text-emerald-300 border border-slate-700 rounded-lg transition"
+                                    title="Chèn mã lập trình (Python / HTML) vào ý này"
+                                  >
+                                    <Code2 className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
                                     onClick={() => setMathModalTarget({ qIndex, type: 'option', optId: letter })}
                                     className="p-1.5 bg-slate-800 hover:bg-teal-900/60 text-slate-300 hover:text-teal-300 border border-slate-700 rounded-lg transition"
                                     title="Chèn công thức toán vào ý này"
@@ -1307,7 +1361,7 @@ export default function ExamManager({ onSelectSessionForMonitor, onSelectSession
                                     </button>
                                   </div>
                                 </div>
-                                {opt.text && (opt.text.includes('$') || opt.text.includes('![')) && (
+                                {opt.text && (opt.text.includes('$') || opt.text.includes('![') || opt.text.includes('```') || opt.text.includes('`')) && (
                                   <div className="pl-9 pr-2 py-1 text-xs text-teal-200/90 bg-teal-950/20 rounded border border-teal-900/30">
                                     <MathContent content={opt.text} />
                                   </div>
@@ -1343,10 +1397,18 @@ export default function ExamManager({ onSelectSessionForMonitor, onSelectSession
                                   value={opt.text}
                                   onChange={e => updateOptionText(qIndex, opt.id, e.target.value)}
                                   onPaste={e => handlePasteInField(e, { qIndex, type: 'option', optId: opt.id })}
-                                  placeholder={`Nội dung lựa chọn ${opt.id} (hỗ trợ $...$ và dán ảnh Ctrl+V)...`}
+                                  placeholder={`Nội dung lựa chọn ${opt.id} (hỗ trợ $...$, khối code và dán ảnh Ctrl+V)...`}
                                   className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs"
                                   required
                                 />
+                                <button
+                                  type="button"
+                                  onClick={() => setCodeModalTarget({ qIndex, type: 'option', optId: opt.id })}
+                                  className="p-1.5 bg-slate-800 hover:bg-emerald-900/60 text-slate-400 hover:text-emerald-300 border border-slate-700 rounded-lg transition"
+                                  title={`Chèn mã lập trình (Python / HTML) vào phương án ${opt.id}`}
+                                >
+                                  <Code2 className="w-3.5 h-3.5" />
+                                </button>
                                 <button
                                   type="button"
                                   onClick={() => setMathModalTarget({ qIndex, type: 'option', optId: opt.id })}
@@ -1364,7 +1426,7 @@ export default function ExamManager({ onSelectSessionForMonitor, onSelectSession
                                   <ImageIcon className="w-3.5 h-3.5" />
                                 </button>
                               </div>
-                              {opt.text && (opt.text.includes('$') || opt.text.includes('![')) && (
+                              {opt.text && (opt.text.includes('$') || opt.text.includes('![') || opt.text.includes('```') || opt.text.includes('`')) && (
                                 <div className="ml-10 p-1.5 bg-slate-950/70 rounded border border-slate-800 text-xs text-slate-200">
                                   <MathContent content={opt.text} />
                                 </div>
@@ -1420,6 +1482,13 @@ export default function ExamManager({ onSelectSessionForMonitor, onSelectSession
         isOpen={Boolean(mathModalTarget)}
         onClose={() => setMathModalTarget(null)}
         onInsert={handleInsertMath}
+      />
+
+      {/* Modal Bảng Chèn Mã Nguồn Lập Trình (Python / HTML) */}
+      <CodeToolbarModal
+        isOpen={Boolean(codeModalTarget)}
+        onClose={() => setCodeModalTarget(null)}
+        onInsert={handleInsertCode}
       />
 
       {/* Input ẩn để chọn tệp hình ảnh */}
