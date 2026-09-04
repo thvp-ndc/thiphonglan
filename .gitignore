@@ -27,3 +27,7 @@ desktop.ini
 
 # Scratch folder
 scratch/
+
+# User uploaded media
+server/uploads/images/*
+!server/uploads/images/.gitkeep

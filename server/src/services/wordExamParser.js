@@ -1,5 +1,10 @@
 const mammoth = require('mammoth');
 const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+const JSZip = require('jszip');
+const { DOMParser } = require('@xmldom/xmldom');
+const { parseOMMLNode } = require('./ommlToLatex');
 const { normalizeTrueFalseMap } = require('./trueFalseUtils');
 
 /**
@@ -8,18 +13,199 @@ const { normalizeTrueFalseMap } = require('./trueFalseUtils');
  * - PHẦN I: Trắc nghiệm nhiều lựa chọn (A, B, C, D)
  * - PHẦN II: Trắc nghiệm Đúng/Sai (4 ý a, b, c, d; đáp án Đ/S hoặc đánh dấu *)
  * - PHẦN III: Tự luận (kèm điểm số và barem chấm)
+ * Hỗ trợ bóc tách công thức toán học Word Equation (OMML sang LaTeX)
+ * Hỗ trợ bóc tách hình ảnh nhúng trong file Word (lưu vào server/uploads/images/)
  */
 class WordExamParser {
   async parseWordBuffer(buffer) {
+    // Thử bóc tách nâng cao với JSZip để giữ trọn vẹn công thức toán và hình ảnh
+    try {
+      if (buffer && buffer[0] === 0x50 && buffer[1] === 0x4b) {
+        const parsed = await this.parseDocxWithOmmlAndMedia(buffer);
+        if (parsed && parsed.questions && parsed.questions.length > 0) {
+          return parsed;
+        }
+      }
+    } catch (err) {
+      console.warn('[WordExamParser] Advanced parseDocx failed, falling back to mammoth:', err.message);
+    }
+
+    // Dự phòng bằng mammoth nếu file là định dạng cũ hoặc cấu trúc lạ
     const result = await mammoth.extractRawText({ buffer });
     const fullText = result.value || '';
     return this.parseExamText(fullText);
   }
 
+  async parseDocxWithOmmlAndMedia(buffer) {
+    const zip = await JSZip.loadAsync(buffer);
+    const docXmlFile = zip.file('word/document.xml');
+    if (!docXmlFile) {
+      throw new Error('word/document.xml không tồn tại trong file .docx');
+    }
+
+    // 1. Trích xuất quan hệ hình ảnh từ word/_rels/document.xml.rels
+    const relMap = {};
+    const relsFile = zip.file('word/_rels/document.xml.rels');
+    if (relsFile) {
+      try {
+        const relsXml = await relsFile.async('text');
+        const relsDom = new DOMParser().parseFromString(relsXml, 'text/xml');
+        const relElements = relsDom.getElementsByTagName('Relationship');
+
+        const uploadsDir = path.resolve(__dirname, '../../uploads/images');
+        if (!fs.existsSync(uploadsDir)) {
+          fs.mkdirSync(uploadsDir, { recursive: true });
+        }
+
+        for (let i = 0; i < relElements.length; i++) {
+          const rel = relElements[i];
+          const type = rel.getAttribute('Type') || '';
+          const rId = rel.getAttribute('Id') || '';
+          let target = rel.getAttribute('Target') || '';
+
+          if (type.includes('/image') && rId && target) {
+            // Chuẩn hóa đường dẫn file ảnh trong zip
+            let zipImgPath = target;
+            if (zipImgPath.startsWith('../')) {
+              zipImgPath = zipImgPath.replace(/^\.\.\//, 'word/');
+            } else if (!zipImgPath.startsWith('word/')) {
+              zipImgPath = 'word/' + zipImgPath.replace(/^\//, '');
+            }
+
+            const imgFileInZip = zip.file(zipImgPath);
+            if (imgFileInZip) {
+              const imgBuffer = await imgFileInZip.async('nodebuffer');
+              const ext = path.extname(zipImgPath).toLowerCase() || '.png';
+              const fileName = `word_${Date.now()}_${crypto.randomBytes(4).toString('hex')}${ext}`;
+              const diskPath = path.join(uploadsDir, fileName);
+              fs.writeFileSync(diskPath, imgBuffer);
+              relMap[rId] = `/uploads/images/${fileName}`;
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[WordExamParser] Lỗi trích xuất quan hệ ảnh rels:', e.message);
+      }
+    }
+
+    // 2. Phân tích nội dung XML của document.xml
+    const docXml = await docXmlFile.async('text');
+    const dom = new DOMParser().parseFromString(docXml, 'text/xml');
+
+    const paragraphs = [];
+    const bodyElements = dom.getElementsByTagName('w:body');
+    const root = bodyElements.length > 0 ? bodyElements[0] : dom.documentElement;
+
+    this.collectParagraphs(root, paragraphs, relMap);
+
+    const fullText = paragraphs.join('\n');
+    return this.parseExamText(fullText);
+  }
+
+  collectParagraphs(node, paragraphs, relMap) {
+    if (!node) return;
+
+    for (let child = node.firstChild; child; child = child.nextSibling) {
+      if (child.nodeType !== 1) continue;
+      const tag = child.localName || child.nodeName.split(':').pop();
+
+      if (tag === 'p') {
+        const pText = this.extractNodeText(child, relMap).trim();
+        if (pText) {
+          paragraphs.push(pText);
+        }
+      } else if (tag === 'tbl') {
+        // Hỗ trợ duyệt qua bảng
+        const rows = child.getElementsByTagName('w:tr');
+        for (let r = 0; r < rows.length; r++) {
+          const cells = rows[r].getElementsByTagName('w:tc');
+          for (let c = 0; c < cells.length; c++) {
+            const cellPs = cells[c].getElementsByTagName('w:p');
+            for (let cp = 0; cp < cellPs.length; cp++) {
+              const cpText = this.extractNodeText(cellPs[cp], relMap).trim();
+              if (cpText) paragraphs.push(cpText);
+            }
+          }
+        }
+      } else {
+        this.collectParagraphs(child, paragraphs, relMap);
+      }
+    }
+  }
+
+  extractNodeText(node, relMap) {
+    if (!node) return '';
+    if (node.nodeType === 3) return node.nodeValue || '';
+    if (node.nodeType !== 1) return '';
+
+    const tag = node.localName || node.nodeName.split(':').pop();
+
+    if (tag === 'oMath' || tag === 'oMathPara') {
+      const latex = parseOMMLNode(node);
+      return latex ? ` ${latex} ` : '';
+    }
+
+    if (tag === 'drawing' || tag === 'pict') {
+      const rId = this.findEmbedId(node);
+      if (rId && relMap && relMap[rId]) {
+        return `\n![Hình ảnh](${relMap[rId]})\n`;
+      }
+      return '';
+    }
+
+    if (tag === 't') {
+      return node.textContent || '';
+    }
+
+    if (tag === 'tab') {
+      return ' ';
+    }
+
+    if (tag === 'br' || tag === 'cr') {
+      return '\n';
+    }
+
+    let text = '';
+    for (let child = node.firstChild; child; child = child.nextSibling) {
+      text += this.extractNodeText(child, relMap);
+    }
+    return text;
+  }
+
+  findEmbedId(element) {
+    if (!element || !element.attributes) return null;
+    for (let i = 0; i < element.attributes.length; i++) {
+      const attr = element.attributes[i];
+      if (
+        attr.name === 'r:embed' ||
+        attr.name === 'embed' ||
+        attr.name === 'r:id' ||
+        attr.localName === 'embed' ||
+        attr.localName === 'id'
+      ) {
+        return attr.value;
+      }
+    }
+    for (let child = element.firstChild; child; child = child.nextSibling) {
+      if (child.nodeType === 1) {
+        const found = this.findEmbedId(child);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+
   parseExamText(text) {
-    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-    if (lines.length === 0) {
+    const rawLines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    if (rawLines.length === 0) {
       throw new Error('File Word rỗng hoặc không có văn bản');
+    }
+
+    // Tiền xử lý: nếu 1 dòng chứa cả 4 đáp án A. ... B. ... C. ... D. ... thì tách ra từng dòng
+    const lines = [];
+    for (const line of rawLines) {
+      const inlineSplit = this.splitInlineOptions(line);
+      lines.push(...inlineSplit);
     }
 
     let examTitle = 'Đề Thi Nhập Từ File Word';
@@ -32,9 +218,9 @@ class WordExamParser {
     let currentSection = 'single_choice'; // 'single_choice' | 'true_false' | 'essay'
 
     // Regex patterns for section headers
-    const part1Regex = /^(?:PHẦN|Phần)\s*(?:I|1|A)?[.:\s-]*(?:CÂU\s+)?(?:TRẮC NGHIỆM\s+)?(?:NHIỀU|NHIEU)/i;
-    const part2Regex = /^(?:PHẦN|Phần)\s*(?:II|2|B)?[.:\s-]*(?:CÂU\s+)?(?:TRẮC NGHIỆM\s+)?(?:ĐÚNG\s*[\/-]?\s*SAI|DUNG\s*[\/-]?\s*SAI)/i;
-    const part3Regex = /^(?:PHẦN|Phần)\s*(?:III|3|C)?[.:\s-]*(?:CÂU\s+HỎI\s+)?(?:TỰ LUẬN|TƯ LUẬN|TU LUAN)/i;
+    const part1Regex = /^(?:PHẦN|Phần)\s*(?:I|1|A)?[.:\s-]*(?:CÂU\s+(?:HỎI\s+)?)?(?:TRẮC\s*NGHIỆM\s+)?(?:NHIỀU|NHIEU)/i;
+    const part2Regex = /^(?:PHẦN|Phần)\s*(?:II|2|B)?[.:\s-]*(?:CÂU\s+(?:HỎI\s+)?)?(?:TRẮC\s*NGHIỆM\s+)?(?:ĐÚNG|DUNG)/i;
+    const part3Regex = /^(?:PHẦN|Phần)\s*(?:III|3|C)?[.:\s-]*(?:CÂU\s+(?:HỎI\s+)?)?(?:TỰ|TƯ|TU)\s*LUẬN/i;
 
     const questionHeaderRegex = /^(?:Câu|CÂU|Bài|BÀI)\s*(\d+)[\s:.-]+(.*)/i;
     
@@ -217,9 +403,13 @@ class WordExamParser {
         continue;
       }
 
-      // Additional text lines
+      // Additional text lines: either extra lines of question body, or extra line of an option (e.g. image or multiline)
       if (currentQ.options.length === 0 && !currentQ.rubric_guide) {
         currentQ.content += (currentQ.content ? '\n' : '') + line;
+      } else if (currentQ.options.length > 0 && !currentQ.rubric_guide && currentQ.question_type !== 'essay') {
+        // Append line (e.g. image or equation) to the latest option
+        const lastOpt = currentQ.options[currentQ.options.length - 1];
+        lastOpt.text += (lastOpt.text ? '\n' : '') + line;
       } else if (currentQ.rubric_guide) {
         currentQ.rubric_guide += line + '\n';
       }
@@ -238,6 +428,25 @@ class WordExamParser {
       total_questions: questions.length,
       questions
     };
+  }
+
+  splitInlineOptions(line) {
+    // Tách dòng có nhiều phương án: "A. ... B. ... C. ... D. ..."
+    // Kiểm tra xem dòng có chứa ít nhất 2 phương án trở lên
+    const pattern = /(?:^|\s+)((?:[*]?)[A-D][*]?|[A-D]\*|\([A-D]\)|\[[A-D]\])[\s:.)-]+/g;
+    const matches = [...line.matchAll(pattern)];
+
+    if (matches.length >= 2 && matches[0].index === 0) {
+      const parts = [];
+      for (let i = 0; i < matches.length; i++) {
+        const start = matches[i].index;
+        const end = (i + 1 < matches.length) ? matches[i + 1].index : line.length;
+        parts.push(line.substring(start, end).trim());
+      }
+      return parts;
+    }
+
+    return [line];
   }
 
   finalizeQuestion(q, questionsList) {

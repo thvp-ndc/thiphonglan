@@ -91,6 +91,45 @@ router.delete('/exams/:id', (req, res) => {
   }
 });
 
+// Upload exam image (from Clipboard paste, file select, or drag-drop)
+router.post('/upload-image', (req, res) => {
+  try {
+    const { imageBase64, filename: originalName } = req.body;
+    if (!imageBase64) {
+      return res.status(400).json({ success: false, message: 'Vui lòng cung cấp dữ liệu hình ảnh' });
+    }
+
+    // Determine extension
+    let ext = 'png';
+    const match = imageBase64.match(/^data:image\/([a-zA-Z0-9+]+);base64,/);
+    if (match) {
+      ext = match[1] === 'jpeg' ? 'jpg' : (match[1] === 'svg+xml' ? 'svg' : match[1]);
+    } else if (originalName && originalName.includes('.')) {
+      ext = originalName.split('.').pop().toLowerCase();
+    }
+
+    const uploadsDir = path.resolve(__dirname, '../../uploads/images');
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+
+    const cleanBase64 = imageBase64.replace(/^data:image\/[a-zA-Z0-9+]+;base64,/, '');
+    const buffer = Buffer.from(cleanBase64, 'base64');
+
+    const fileName = `img_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.${ext}`;
+    const filePath = path.join(uploadsDir, fileName);
+    fs.writeFileSync(filePath, buffer);
+
+    res.json({
+      success: true,
+      url: `/uploads/images/${fileName}`,
+      fileName
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Lỗi lưu hình ảnh: ' + err.message });
+  }
+});
+
 router.post('/exams/import-word', async (req, res) => {
   try {
     const { fileBase64, textContent } = req.body;

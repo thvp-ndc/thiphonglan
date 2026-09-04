@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { ArrowLeft, CheckCircle2, FileEdit, Award, HelpCircle, Save, Download, FileText, ChevronRight, User, AlertCircle, Sparkles } from 'lucide-react';
 import StudentPaperModal from './StudentPaperModal';
+import MathContent from '../common/MathContent';
 
 export default function EssayGrading({ sessionId, onBack, onOpenResults }) {
   const [submissions, setSubmissions] = useState([]);
@@ -416,7 +417,9 @@ export default function EssayGrading({ sessionId, onBack, onOpenResults }) {
                     CÂU {currentSub.order_index} (Tự Luận - Tối Đa: {currentSub.question_max_score} điểm)
                   </span>
                 </div>
-                <h4 className="text-white font-medium text-sm leading-relaxed whitespace-pre-wrap">{currentSub.question_content}</h4>
+                <div className="text-white font-medium text-sm leading-relaxed">
+                  <MathContent content={currentSub.question_content} />
+                </div>
               </div>
 
               {/* 2-Column Split: Student Answer (Left) vs Rubric & Grading Inputs (Right) */}
@@ -431,7 +434,7 @@ export default function EssayGrading({ sessionId, onBack, onOpenResults }) {
                   </div>
                   <div className="flex-1 overflow-y-auto whitespace-pre-wrap text-sm text-slate-200 leading-relaxed font-sans pr-2">
                     {currentSub.essay_content && currentSub.essay_content.trim() ? (
-                      currentSub.essay_content
+                      <MathContent content={currentSub.essay_content} />
                     ) : (
                       <div className="p-6 text-center text-slate-500 italic bg-slate-950/40 rounded-lg border border-dashed border-slate-800">
                         <AlertCircle className="w-8 h-8 mx-auto text-slate-600 mb-2" />
@@ -449,8 +452,8 @@ export default function EssayGrading({ sessionId, onBack, onOpenResults }) {
                       <h5 className="text-xs font-bold text-amber-400 flex items-center gap-1.5 mb-1.5">
                         <HelpCircle className="w-3.5 h-3.5" /> Barem Chấm & Đáp Án Mẫu:
                       </h5>
-                      <div className="whitespace-pre-wrap text-xs text-amber-200/90 leading-relaxed font-sans">
-                        {currentSub.rubric_guide || 'Không có hướng dẫn chấm kèm theo.'}
+                      <div className="text-xs text-amber-200/90 leading-relaxed font-sans">
+                        <MathContent content={currentSub.rubric_guide || 'Không có hướng dẫn chấm kèm theo.'} />
                       </div>
                     </div>
 

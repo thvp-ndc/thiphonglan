@@ -1,6 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, FileText, CheckCircle2, BookOpen, Clock, Shuffle, HelpCircle, Edit2, Play, Lock, Upload, FileUp, AlertCircle, Users, Download } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Plus, Trash2, FileText, CheckCircle2, BookOpen, Clock, Shuffle, HelpCircle, Edit2, Play, Lock, Upload, FileUp, AlertCircle, Users, Download, Image as ImageIcon, Sigma, Eye } from 'lucide-react';
 import SessionStudentsModal from './SessionStudentsModal';
+import MathToolbarModal from '../common/MathToolbarModal';
+import MathContent from '../common/MathContent';
 
 export default function ExamManager({ onSelectSessionForMonitor, onSelectSessionForResults }) {
   const [exams, setExams] = useState([]);
@@ -20,6 +22,99 @@ export default function ExamManager({ onSelectSessionForMonitor, onSelectSession
     questions: []
   });
   const [autoSyncScore, setAutoSyncScore] = useState(true);
+
+  // Math & Image Editing State
+  const [mathModalTarget, setMathModalTarget] = useState(null); // { qIndex, type: 'content'|'option'|'rubric', optId?: string }
+  const [imageTarget, setImageTarget] = useState(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const imageFileInputRef = useRef(null);
+
+  const insertTextToTarget = (target, textToInsert) => {
+    if (!target) return;
+    const { qIndex, type, optId } = target;
+    if (type === 'content') {
+      const prev = examForm.questions[qIndex]?.content || '';
+      updateQuestion(qIndex, 'content', prev + (prev ? ' ' : '') + textToInsert);
+    } else if (type === 'rubric') {
+      const prev = examForm.questions[qIndex]?.rubric_guide || '';
+      updateQuestion(qIndex, 'rubric_guide', prev + (prev ? ' ' : '') + textToInsert);
+    } else if (type === 'option') {
+      const q = examForm.questions[qIndex];
+      if (q) {
+        const opt = (q.options || []).find(o => o.id.toLowerCase() === optId.toLowerCase());
+        const prev = opt?.text || '';
+        updateOptionText(qIndex, optId, prev + (prev ? ' ' : '') + textToInsert);
+      }
+    }
+  };
+
+  const handleInsertMath = (latex) => {
+    if (!mathModalTarget) return;
+    insertTextToTarget(mathModalTarget, latex);
+  };
+
+  const handleUploadImageBlob = async (blob, target) => {
+    if (!blob || !target) return;
+    try {
+      setUploadingImage(true);
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const base64 = reader.result;
+          const res = await fetch('/api/upload-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageBase64: base64 })
+          });
+          const data = await res.json();
+          if (data.success) {
+            const imgMarkdown = `\n![Hình ảnh](${data.url})\n`;
+            insertTextToTarget(target, imgMarkdown);
+          } else {
+            alert('Lỗi lưu hình ảnh: ' + data.message);
+          }
+        } catch (err) {
+          alert('Lỗi tải ảnh lên máy chủ: ' + err.message);
+        } finally {
+          setUploadingImage(false);
+        }
+      };
+      reader.readAsDataURL(blob);
+    } catch (e) {
+      setUploadingImage(false);
+      alert('Lỗi đọc tệp ảnh: ' + e.message);
+    }
+  };
+
+  const handlePasteInField = (e, target) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image') !== -1) {
+        const file = items[i].getAsFile();
+        if (file) {
+          e.preventDefault();
+          handleUploadImageBlob(file, target);
+          return;
+        }
+      }
+    }
+  };
+
+  const handlePickImageForTarget = (target) => {
+    setImageTarget(target);
+    if (imageFileInputRef.current) {
+      imageFileInputRef.current.value = '';
+      imageFileInputRef.current.click();
+    }
+  };
+
+  const handleFilePicked = (e) => {
+    const file = e.target.files?.[0];
+    if (file && imageTarget) {
+      handleUploadImageBlob(file, imageTarget);
+    }
+  };
 
   // Session Modal State (Create or Edit)
   const [showSessionModal, setShowSessionModal] = useState(false);
@@ -1041,17 +1136,56 @@ export default function ExamManager({ onSelectSessionForMonitor, onSelectSession
                       </div>
                     </div>
 
-                    {/* Nội dung câu hỏi: KÉO DÃN ĐƯỢC (RESIZABLE) */}
-                    <div>
+                    {/* Nội dung câu hỏi: KÉO DÃN ĐƯỢC (RESIZABLE) CÓ THANH CÔNG CỤ TOÁN & ẢNH */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between pb-1">
+                        <label className="text-xs font-semibold text-slate-300">Nội dung câu hỏi:</label>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setMathModalTarget({ qIndex, type: 'content' })}
+                            className="px-2.5 py-1 bg-blue-950/80 hover:bg-blue-900 text-blue-300 border border-blue-800/80 rounded-lg text-xs font-semibold flex items-center gap-1 transition shadow-sm"
+                            title="Chèn công thức toán học KaTeX"
+                          >
+                            <Sigma className="w-3.5 h-3.5 text-blue-400" />
+                            Công thức Toán
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handlePickImageForTarget({ qIndex, type: 'content' })}
+                            className="px-2.5 py-1 bg-sky-950/80 hover:bg-sky-900 text-sky-300 border border-sky-800/80 rounded-lg text-xs font-semibold flex items-center gap-1 transition shadow-sm"
+                            title="Chọn hình ảnh từ máy tính hoặc bấm Ctrl+V để dán trực tiếp ảnh chụp màn hình"
+                          >
+                            <ImageIcon className="w-3.5 h-3.5 text-sky-400" />
+                            Thêm ảnh
+                          </button>
+                          <span className="text-[11px] text-slate-500 italic hidden sm:inline">(Dán ảnh Ctrl+V)</span>
+                        </div>
+                      </div>
+
                       <textarea
                         value={q.content}
                         onChange={e => updateQuestion(qIndex, 'content', e.target.value)}
-                        placeholder={q.question_type === 'essay' ? 'Nhập nội dung đề bài tự luận (có thể kéo góc dưới để mở rộng ô nhập)...' : 'Nhập nội dung câu hỏi...'}
+                        onPaste={e => handlePasteInField(e, { qIndex, type: 'content' })}
+                        placeholder={q.question_type === 'essay' ? 'Nhập nội dung đề bài tự luận (hỗ trợ công thức $...$ và dán ảnh Ctrl+V)...' : 'Nhập nội dung câu hỏi (hỗ trợ công thức $...$ và dán ảnh Ctrl+V)...'}
                         rows={q.question_type === 'essay' ? 4 : 2}
                         style={{ minHeight: q.question_type === 'essay' ? '120px' : '70px', resize: 'vertical' }}
-                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white text-sm focus:border-sky-500 focus:outline-none"
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white text-sm focus:border-sky-500 focus:outline-none leading-relaxed"
                         required
                       />
+
+                      {/* Khung Xem Trước Thời Gian Thực (Live Preview) cho Câu Hỏi */}
+                      {q.content && (q.content.includes('$') || q.content.includes('![')) && (
+                        <div className="p-3 bg-slate-950/80 border border-slate-700/80 rounded-xl shadow-inner animate-fadeIn">
+                          <div className="flex items-center gap-1.5 text-[11px] font-bold text-sky-400 mb-1.5 border-b border-slate-800/80 pb-1">
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>Xem trước hiển thị (Live Preview KaTeX & Ảnh):</span>
+                          </div>
+                          <div className="text-sm text-slate-100 leading-relaxed overflow-x-auto">
+                            <MathContent content={q.content} />
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     {/* Câu hỏi Tự Luận: Khung hướng dẫn chấm / Barem điểm - KÉO DÃN ĐƯỢC */}
@@ -1061,16 +1195,41 @@ export default function ExamManager({ onSelectSessionForMonitor, onSelectSession
                           <label className="text-xs font-semibold text-amber-400 flex items-center gap-1">
                             <HelpCircle className="w-3.5 h-3.5" /> Barem Chấm & Đáp Án Mẫu (Dành cho Giáo Viên):
                           </label>
-                          <span className="text-[10px] text-amber-400/70 italic">Kéo góc dưới phải để mở rộng</span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setMathModalTarget({ qIndex, type: 'rubric' })}
+                              className="px-2 py-0.5 bg-amber-950 hover:bg-amber-900 text-amber-300 border border-amber-800 rounded text-[11px] font-semibold flex items-center gap-1 transition"
+                              title="Chèn công thức toán vào barem chấm"
+                            >
+                              <Sigma className="w-3 h-3" /> Công thức
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handlePickImageForTarget({ qIndex, type: 'rubric' })}
+                              className="px-2 py-0.5 bg-amber-950 hover:bg-amber-900 text-amber-300 border border-amber-800 rounded text-[11px] font-semibold flex items-center gap-1 transition"
+                              title="Thêm ảnh vào barem chấm (hoặc dán Ctrl+V)"
+                            >
+                              <ImageIcon className="w-3 h-3" /> Ảnh
+                            </button>
+                            <span className="text-[10px] text-amber-400/70 italic hidden sm:inline">Kéo góc để mở rộng</span>
+                          </div>
                         </div>
                         <textarea
                           value={q.rubric_guide}
                           onChange={e => updateQuestion(qIndex, 'rubric_guide', e.target.value)}
-                          placeholder="Nhập tiêu chí chấm, các ý cần có, barem điểm chi tiết..."
+                          onPaste={e => handlePasteInField(e, { qIndex, type: 'rubric' })}
+                          placeholder="Nhập tiêu chí chấm, các ý cần có, barem điểm chi tiết (hỗ trợ công thức $...$ và ảnh)..."
                           rows={4}
                           style={{ minHeight: '120px', resize: 'vertical' }}
-                          className="w-full bg-slate-950/80 border border-slate-700 rounded-lg p-2.5 text-amber-200 text-xs focus:outline-none"
+                          className="w-full bg-slate-950/80 border border-slate-700 rounded-lg p-2.5 text-amber-200 text-xs focus:outline-none leading-relaxed"
                         />
+                        {q.rubric_guide && (q.rubric_guide.includes('$') || q.rubric_guide.includes('![')) && (
+                          <div className="p-2.5 bg-amber-950/30 border border-amber-800/40 rounded-lg text-xs text-amber-200 animate-fadeIn">
+                            <span className="font-bold text-[10px] text-amber-400 block mb-1">Xem trước barem:</span>
+                            <MathContent content={q.rubric_guide} />
+                          </div>
+                        )}
                       </div>
                     ) : q.question_type === 'true_false' ? (
                       /* CÂU HỎI ĐÚNG / SAI 4 Ý CHUẨN BGDĐT 2025 */
@@ -1093,42 +1252,66 @@ export default function ExamManager({ onSelectSessionForMonitor, onSelectSession
                             }
 
                             return (
-                              <div key={letter} className="flex items-center gap-2.5 bg-slate-950/80 p-2.5 rounded-lg border border-slate-800">
-                                <span className="w-7 h-7 rounded-lg bg-teal-950 text-teal-300 font-mono font-bold text-xs flex items-center justify-center border border-teal-800 flex-shrink-0">
-                                  {letter})
-                                </span>
-                                <input
-                                  type="text"
-                                  value={opt.text}
-                                  onChange={e => updateOptionText(qIndex, letter, e.target.value)}
-                                  placeholder={`Nhập nội dung mệnh đề ý ${letter})...`}
-                                  className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs focus:border-teal-500 focus:outline-none"
-                                  required
-                                />
-                                <div className="flex items-center gap-1.5 flex-shrink-0">
+                              <div key={letter} className="bg-slate-950/80 p-2.5 rounded-lg border border-slate-800 space-y-1.5">
+                                <div className="flex items-center gap-2">
+                                  <span className="w-7 h-7 rounded-lg bg-teal-950 text-teal-300 font-mono font-bold text-xs flex items-center justify-center border border-teal-800 flex-shrink-0">
+                                    {letter})
+                                  </span>
+                                  <input
+                                    type="text"
+                                    value={opt.text}
+                                    onChange={e => updateOptionText(qIndex, letter, e.target.value)}
+                                    onPaste={e => handlePasteInField(e, { qIndex, type: 'option', optId: letter })}
+                                    placeholder={`Nhập nội dung mệnh đề ý ${letter}) (hỗ trợ $...$ và Ctrl+V dán ảnh)...`}
+                                    className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs focus:border-teal-500 focus:outline-none"
+                                    required
+                                  />
                                   <button
                                     type="button"
-                                    onClick={() => updateTrueFalseAnswer(qIndex, letter, 'T')}
-                                    className={`px-3 py-1 rounded-md text-xs font-bold transition flex items-center gap-1 ${
-                                      currentAns === 'T'
-                                        ? 'bg-emerald-600 text-white shadow ring-2 ring-emerald-400 font-black'
-                                        : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
-                                    }`}
+                                    onClick={() => setMathModalTarget({ qIndex, type: 'option', optId: letter })}
+                                    className="p-1.5 bg-slate-800 hover:bg-teal-900/60 text-slate-300 hover:text-teal-300 border border-slate-700 rounded-lg transition"
+                                    title="Chèn công thức toán vào ý này"
                                   >
-                                    ✓ ĐÚNG
+                                    <Sigma className="w-3.5 h-3.5" />
                                   </button>
                                   <button
                                     type="button"
-                                    onClick={() => updateTrueFalseAnswer(qIndex, letter, 'F')}
-                                    className={`px-3 py-1 rounded-md text-xs font-bold transition flex items-center gap-1 ${
-                                      currentAns === 'F'
-                                        ? 'bg-rose-600 text-white shadow ring-2 ring-rose-400 font-black'
-                                        : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
-                                    }`}
+                                    onClick={() => handlePickImageForTarget({ qIndex, type: 'option', optId: letter })}
+                                    className="p-1.5 bg-slate-800 hover:bg-sky-900/60 text-slate-300 hover:text-sky-300 border border-slate-700 rounded-lg transition"
+                                    title="Thêm ảnh cho ý này (hoặc bấm Ctrl+V vào ô)"
                                   >
-                                    ✗ SAI
+                                    <ImageIcon className="w-3.5 h-3.5" />
                                   </button>
+                                  <div className="flex items-center gap-1 flex-shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={() => updateTrueFalseAnswer(qIndex, letter, 'T')}
+                                      className={`px-2.5 py-1 rounded-md text-xs font-bold transition flex items-center gap-1 ${
+                                        currentAns === 'T'
+                                          ? 'bg-emerald-600 text-white shadow ring-2 ring-emerald-400 font-black'
+                                          : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
+                                      }`}
+                                    >
+                                      ✓ ĐÚNG
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => updateTrueFalseAnswer(qIndex, letter, 'F')}
+                                      className={`px-2.5 py-1 rounded-md text-xs font-bold transition flex items-center gap-1 ${
+                                        currentAns === 'F'
+                                          ? 'bg-rose-600 text-white shadow ring-2 ring-rose-400 font-black'
+                                          : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
+                                      }`}
+                                    >
+                                      ✗ SAI
+                                    </button>
+                                  </div>
                                 </div>
+                                {opt.text && (opt.text.includes('$') || opt.text.includes('![')) && (
+                                  <div className="pl-9 pr-2 py-1 text-xs text-teal-200/90 bg-teal-950/20 rounded border border-teal-900/30">
+                                    <MathContent content={opt.text} />
+                                  </div>
+                                )}
                               </div>
                             );
                           })}
@@ -1143,24 +1326,49 @@ export default function ExamManager({ onSelectSessionForMonitor, onSelectSession
                         {q.options.map(opt => {
                           const isCorrect = q.correct_answers.includes(opt.id);
                           return (
-                            <div key={opt.id} className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => toggleCorrectAnswer(qIndex, opt.id)}
-                                className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs transition ${
-                                  isCorrect ? 'bg-emerald-600 text-white ring-2 ring-emerald-400' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-                                }`}
-                              >
-                                {opt.id}
-                              </button>
-                              <input
-                                type="text"
-                                value={opt.text}
-                                onChange={e => updateOptionText(qIndex, opt.id, e.target.value)}
-                                placeholder={`Nội dung lựa chọn ${opt.id}...`}
-                                className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs"
-                                required
-                              />
+                            <div key={opt.id} className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleCorrectAnswer(qIndex, opt.id)}
+                                  className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs transition ${
+                                    isCorrect ? 'bg-emerald-600 text-white ring-2 ring-emerald-400' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                                  }`}
+                                  title="Click để đặt làm đáp án đúng"
+                                >
+                                  {opt.id}
+                                </button>
+                                <input
+                                  type="text"
+                                  value={opt.text}
+                                  onChange={e => updateOptionText(qIndex, opt.id, e.target.value)}
+                                  onPaste={e => handlePasteInField(e, { qIndex, type: 'option', optId: opt.id })}
+                                  placeholder={`Nội dung lựa chọn ${opt.id} (hỗ trợ $...$ và dán ảnh Ctrl+V)...`}
+                                  className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs"
+                                  required
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setMathModalTarget({ qIndex, type: 'option', optId: opt.id })}
+                                  className="p-1.5 bg-slate-800 hover:bg-blue-900/60 text-slate-400 hover:text-blue-300 border border-slate-700 rounded-lg transition"
+                                  title={`Chèn công thức toán vào phương án ${opt.id}`}
+                                >
+                                  <Sigma className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handlePickImageForTarget({ qIndex, type: 'option', optId: opt.id })}
+                                  className="p-1.5 bg-slate-800 hover:bg-sky-900/60 text-slate-400 hover:text-sky-300 border border-slate-700 rounded-lg transition"
+                                  title={`Thêm hình ảnh cho phương án ${opt.id} (hoặc dán Ctrl+V)`}
+                                >
+                                  <ImageIcon className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                              {opt.text && (opt.text.includes('$') || opt.text.includes('![')) && (
+                                <div className="ml-10 p-1.5 bg-slate-950/70 rounded border border-slate-800 text-xs text-slate-200">
+                                  <MathContent content={opt.text} />
+                                </div>
+                              )}
                             </div>
                           );
                         })}
@@ -1205,6 +1413,30 @@ export default function ExamManager({ onSelectSessionForMonitor, onSelectSession
             fetchData();
           }}
         />
+      )}
+
+      {/* Modal Bảng Ký Hiệu & Công Thức Toán Học KaTeX */}
+      <MathToolbarModal
+        isOpen={Boolean(mathModalTarget)}
+        onClose={() => setMathModalTarget(null)}
+        onInsert={handleInsertMath}
+      />
+
+      {/* Input ẩn để chọn tệp hình ảnh */}
+      <input
+        ref={imageFileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleFilePicked}
+      />
+
+      {/* Toast thông báo đang tải ảnh lên máy chủ */}
+      {uploadingImage && (
+        <div className="fixed bottom-6 right-6 z-50 bg-sky-600 text-white px-4 py-2.5 rounded-xl shadow-2xl flex items-center gap-2 animate-bounce text-xs font-bold">
+          <ImageIcon className="w-4 h-4 animate-spin" />
+          <span>Đang tải hình ảnh lên máy chủ...</span>
+        </div>
       )}
     </div>
   );

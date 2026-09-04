@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 import { Clock, CheckCircle, AlertTriangle, Send, ShieldAlert, Flag, Check, FileText, Maximize2 } from 'lucide-react';
+import MathContent from '../common/MathContent';
 
 export default function StudentExam({ examData, onExamFinished }) {
   const { attempt, session, examPaper, savedAnswers: initialAnswers, remainingSeconds: initialRemainingSeconds } = examData;
@@ -560,8 +561,8 @@ export default function StudentExam({ examData, onExamFinished }) {
               </div>
 
               {/* Question Statement */}
-              <div className="text-base font-semibold text-white leading-relaxed mb-6 whitespace-pre-wrap">
-                {currentQ.content}
+              <div className="text-base font-semibold text-white leading-relaxed mb-6">
+                <MathContent content={currentQ.content} />
               </div>
 
               {/* Question Body: TỰ LUẬN VS ĐÚNG/SAI VS TRẮC NGHIỆM */}
@@ -624,7 +625,9 @@ export default function StudentExam({ examData, onExamFinished }) {
                             }`}>
                               {opt.id})
                             </span>
-                            <p className="text-sm text-slate-200 mt-1 leading-relaxed">{opt.text}</p>
+                            <div className="text-sm text-slate-200 mt-1 leading-relaxed">
+                              <MathContent content={opt.text} />
+                            </div>
                           </div>
 
                           {/* 2 Nút ĐÚNG và SAI */}
@@ -677,7 +680,9 @@ export default function StudentExam({ examData, onExamFinished }) {
                         }`}>
                           {opt.id}
                         </span>
-                        <span className="text-sm text-slate-200 mt-1 leading-relaxed">{opt.text}</span>
+                        <div className="text-sm text-slate-200 mt-1 leading-relaxed">
+                          <MathContent content={opt.text} />
+                        </div>
                       </button>
                     );
                   })}

@@ -1,6 +1,7 @@
 const express = require('express');
 const http = require('node:http');
 const path = require('node:path');
+const fs = require('node:fs');
 const cors = require('cors');
 const { Server } = require('socket.io');
 
@@ -25,8 +26,16 @@ app.set('io', io);
 
 // Middlewares
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// Serve uploaded exam images (Stored in server/uploads to prevent deletion during vite build)
+const uploadsPath = path.join(__dirname, '..', 'uploads');
+const imagesPath = path.join(uploadsPath, 'images');
+if (!fs.existsSync(imagesPath)) {
+  fs.mkdirSync(imagesPath, { recursive: true });
+}
+app.use('/uploads', express.static(uploadsPath));
 
 // Serve static frontend assets if built
 const staticPath = path.join(__dirname, '..', 'public');
