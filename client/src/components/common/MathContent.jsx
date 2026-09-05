@@ -98,25 +98,28 @@ export default function MathContent({ content = '', className = '', zoomable = t
               const alt = imgMatch[1] || 'Hình ảnh câu hỏi';
               const src = imgMatch[2];
               return (
-                <div key={index} className="my-2 text-center group relative inline-block">
-                  <img
-                    src={src}
-                    alt={alt}
-                    onClick={() => zoomable && setZoomedImage({ src, alt })}
-                    className={`max-w-full h-auto max-h-[380px] object-contain rounded-lg border border-slate-700 shadow-md bg-slate-900/60 inline-block ${
-                      zoomable ? 'cursor-pointer hover:border-blue-500 hover:shadow-blue-500/20 transition-all' : ''
-                    }`}
-                    loading="lazy"
-                  />
+                <div key={index} className="my-2 text-center group relative inline-block max-w-full">
+                  <div className="p-1.5 bg-white/95 rounded-xl border border-slate-700/60 shadow-md inline-block max-w-full overflow-hidden">
+                    <img
+                      src={src}
+                      alt={alt}
+                      onClick={() => zoomable && setZoomedImage({ src, alt })}
+                      className={`max-w-full h-auto max-h-[420px] object-contain rounded-lg inline-block ${
+                        zoomable ? 'cursor-pointer hover:opacity-95 transition-all' : ''
+                      }`}
+                      loading="lazy"
+                    />
+                  </div>
                   {zoomable && (
-                    <span
+                    <button
+                      type="button"
                       onClick={() => setZoomedImage({ src, alt })}
-                      className="absolute bottom-2 right-2 bg-slate-900/80 hover:bg-blue-600 text-white p-1.5 rounded-md text-xs cursor-pointer flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shadow"
-                      title="Nhấn để phóng to hình ảnh"
+                      className="absolute bottom-3 right-3 bg-slate-900/90 hover:bg-sky-600 text-white px-2.5 py-1 rounded-lg text-[11px] font-medium flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity shadow-lg backdrop-blur-sm border border-slate-700/80"
+                      title="Nhấn để phóng to hình ảnh độ phân giải cao"
                     >
                       <ZoomIn className="w-3.5 h-3.5" />
-                      Phóng to
-                    </span>
+                      <span>Phóng to</span>
+                    </button>
                   )}
                 </div>
               );
@@ -173,11 +176,11 @@ export default function MathContent({ content = '', className = '', zoomable = t
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="overflow-auto max-h-[80vh] flex items-center justify-center">
+            <div className="overflow-auto max-h-[80vh] w-full flex items-center justify-center p-3 bg-white/95 rounded-lg border border-slate-700">
               <img
                 src={zoomedImage.src}
                 alt={zoomedImage.alt}
-                className="max-w-full max-h-[75vh] object-contain rounded"
+                className="max-w-full max-h-[75vh] object-contain rounded shadow-sm"
               />
             </div>
           </div>

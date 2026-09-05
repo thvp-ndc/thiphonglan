@@ -121,6 +121,23 @@ function parseOMMLNode(node) {
       return `{${base}}_{${sub}}^{${sup}}`;
     }
 
+    case 'sPre': { // Prescript (Trước base)
+      let base = '';
+      let sub = '';
+      let sup = '';
+      for (let child = node.firstChild; child; child = child.nextSibling) {
+        const childTag = child.localName || child.nodeName.split(':').pop();
+        if (childTag === 'e') {
+          base = parseOMMLChildren(child).trim();
+        } else if (childTag === 'sub') {
+          sub = parseOMMLChildren(child).trim();
+        } else if (childTag === 'sup') {
+          sup = parseOMMLChildren(child).trim();
+        }
+      }
+      return `{}_{${sub}}^{${sup}}{${base}}`;
+    }
+
     case 'd': { // Delimiter
       let begChr = '(';
       let endChr = ')';
@@ -141,9 +158,19 @@ function parseOMMLNode(node) {
         }
       }
 
-      if (begChr === '{' && (!endChr || endChr === '')) {
-        // System of equations or piecewise function
+      if (begChr === '{' && (!endChr || endChr === '' || endChr === '|' || endChr === '.')) {
+        // Hệ phương trình hoặc hàm từng khúc
         return `\\begin{cases} ${elements.join(' \\\\ ')} \\end{cases}`;
+      }
+
+      if (begChr === '[' && endChr === ']') {
+        return `\\left[ ${elements.join(', ')} \\right]`;
+      }
+      if (begChr === '{' && endChr === '}') {
+        return `\\left\\{ ${elements.join(', ')} \\right\\}`;
+      }
+      if (begChr === '|' && endChr === '|') {
+        return `\\left| ${elements.join(', ')} \\right|`;
       }
 
       const left = begChr === '{' ? '\\left\\{' : (begChr ? `\\left${begChr}` : '\\left.');
@@ -151,7 +178,7 @@ function parseOMMLNode(node) {
       return `${left}${elements.join(', ')}${right}`;
     }
 
-    case 'nary': { // N-ary (Integral, Sum, Product)
+    case 'nary': { // N-ary (Integral, Sum, Product, Contour)
       let chr = '\\int';
       let sub = '';
       let sup = '';
@@ -165,6 +192,10 @@ function parseOMMLNode(node) {
               const val = pr.getAttribute('m:val') || pr.getAttribute('val');
               if (val === '∑' || val === '\u2211') chr = '\\sum';
               else if (val === '∏' || val === '\u220F') chr = '\\prod';
+              else if (val === '∐' || val === '\u2210') chr = '\\coprod';
+              else if (val === '∮' || val === '\u222E') chr = '\\oint';
+              else if (val === '∬' || val === '\u222C') chr = '\\iint';
+              else if (val === '∭' || val === '\u222D') chr = '\\iiint';
               else if (val === '∫' || val === '\u222B') chr = '\\int';
             }
           }
@@ -183,7 +214,7 @@ function parseOMMLNode(node) {
       return res;
     }
 
-    case 'limLow': { // Limit
+    case 'limLow': { // Limit / Min / Max
       let e = '\\lim';
       let lim = '';
       for (let child = node.firstChild; child; child = child.nextSibling) {
@@ -194,7 +225,18 @@ function parseOMMLNode(node) {
       return `${e}_{${lim}}`;
     }
 
-    case 'func': { // Function like sin, cos
+    case 'limUpp': { // Limit Upper
+      let e = '\\lim';
+      let lim = '';
+      for (let child = node.firstChild; child; child = child.nextSibling) {
+        const childTag = child.localName || child.nodeName.split(':').pop();
+        if (childTag === 'e') e = parseOMMLChildren(child).trim();
+        else if (childTag === 'lim') lim = parseOMMLChildren(child).trim();
+      }
+      return `${e}^{${lim}}`;
+    }
+
+    case 'func': { // Function like sin, cos, tan, ln, log
       let fName = '';
       let e = '';
       for (let child = node.firstChild; child; child = child.nextSibling) {
@@ -202,7 +244,7 @@ function parseOMMLNode(node) {
         if (childTag === 'fName') fName = parseOMMLChildren(child).trim();
         else if (childTag === 'e') e = parseOMMLChildren(child).trim();
       }
-      return `${fName}${e}`;
+      return `${fName} ${e}`;
     }
 
     case 'acc': { // Accent / Vector / Hat / Dot
@@ -219,9 +261,11 @@ function parseOMMLNode(node) {
           e = parseOMMLChildren(child).trim();
         }
       }
-      if (chr === '^') return `\\hat{${e}}`;
-      if (chr === '.' || chr === '\u02D9') return `\\dot{${e}}`;
-      if (chr === '\u0304' || chr === '_') return `\\bar{${e}}`;
+      if (chr === '^' || chr === '̂') return `\\hat{${e}}`;
+      if (chr === '.' || chr === '\u02D9' || chr === '̇') return `\\dot{${e}}`;
+      if (chr === '..' || chr === '̈') return `\\ddot{${e}}`;
+      if (chr === '\u0304' || chr === '_' || chr === '̄') return `\\bar{${e}}`;
+      if (chr === '~' || chr === '̃') return `\\tilde{${e}}`;
       return `\\vec{${e}}`;
     }
 
@@ -247,7 +291,43 @@ function parseOMMLNode(node) {
           rows.push(cells.join(' & '));
         }
       }
-      return `\\begin{matrix} ${rows.join(' \\\\ ')} \\end{matrix}`;
+      return `\\begin{pmatrix} ${rows.join(' \\\\ ')} \\end{pmatrix}`;
+    }
+
+    case 'eqArr': { // Equation Array
+      const rows = [];
+      for (let child = node.firstChild; child; child = child.nextSibling) {
+        const childTag = child.localName || child.nodeName.split(':').pop();
+        if (childTag === 'e') {
+          rows.push(parseOMMLChildren(child).trim());
+        }
+      }
+      return `\\begin{aligned} ${rows.join(' \\\\ ')} \\end{aligned}`;
+    }
+
+    case 'borderBox': {
+      return `\\boxed{${parseOMMLChildren(node).trim()}}`;
+    }
+
+    case 'box': {
+      return parseOMMLChildren(node);
+    }
+
+    case 'groupChr': { // Overbrace / Underbrace
+      let e = '';
+      let pos = 'bot';
+      for (let child = node.firstChild; child; child = child.nextSibling) {
+        const childTag = child.localName || child.nodeName.split(':').pop();
+        if (childTag === 'groupChrPr') {
+          for (let pr = child.firstChild; pr; pr = pr.nextSibling) {
+            const prTag = pr.localName || pr.nodeName.split(':').pop();
+            if (prTag === 'pos') pos = pr.getAttribute('m:val') || pr.getAttribute('val') || 'bot';
+          }
+        } else if (childTag === 'e') {
+          e = parseOMMLChildren(child).trim();
+        }
+      }
+      return pos === 'top' ? `\\overbrace{${e}}` : `\\underbrace{${e}}`;
     }
 
     default: {
@@ -279,6 +359,10 @@ function cleanMathText(text) {
     .replace(/\u2208/g, ' \\in ')
     .replace(/\u2209/g, ' \\notin ')
     .replace(/\u2282/g, ' \\subset ')
+    .replace(/\u2283/g, ' \\supset ')
+    .replace(/\u2286/g, ' \\subseteq ')
+    .replace(/\u2287/g, ' \\supseteq ')
+    .replace(/\u2205/g, ' \\emptyset ')
     .replace(/\u222A/g, ' \\cup ')
     .replace(/\u2229/g, ' \\cap ')
     .replace(/\u2200/g, ' \\forall ')
@@ -290,18 +374,23 @@ function cleanMathText(text) {
     .replace(/\u2225/g, ' \\parallel ')
     .replace(/\u2220/g, ' \\angle ')
     .replace(/\u00B0/g, '^{\\circ}')
+    .replace(/\u2032/g, "'")
+    .replace(/\u2033/g, "''")
     .replace(/\u03C0/g, ' \\pi ')
     .replace(/\u03B1/g, ' \\alpha ')
     .replace(/\u03B2/g, ' \\beta ')
     .replace(/\u03B3/g, ' \\gamma ')
     .replace(/\u03B4/g, ' \\delta ')
+    .replace(/\u03B5/g, ' \\epsilon ')
     .replace(/\u03B8/g, ' \\theta ')
     .replace(/\u03BB/g, ' \\lambda ')
     .replace(/\u03BC/g, ' \\mu ')
     .replace(/\u03C3/g, ' \\sigma ')
     .replace(/\u03C9/g, ' \\omega ')
     .replace(/\u0394/g, ' \\Delta ')
-    .replace(/\u03A9/g, ' \\Omega ');
+    .replace(/\u03A9/g, ' \\Omega ')
+    .replace(/\u03A3/g, ' \\Sigma ')
+    .replace(/\u03A6/g, ' \\Phi ');
 }
 
 module.exports = {

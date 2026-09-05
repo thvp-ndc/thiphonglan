@@ -2,6 +2,7 @@ const JSZip = require('jszip');
 const path = require('node:path');
 const fs = require('node:fs');
 const db = require('../db');
+const { getImageDimensions, calculateWordEmuSize } = require('./imageUtils');
 
 function escapeXml(str) {
   if (!str) return '';
@@ -47,7 +48,7 @@ class ExamExportService {
     const uploadsDir = path.resolve(__dirname, '../../uploads/images');
     let imgCounter = 0;
 
-    // Helper: Thêm ảnh vào document và trả về XML drawing
+    // Helper: Thêm ảnh vào document và trả về XML drawing với kích thước chuẩn xác theo tỷ lệ thực tế
     const embedImage = (imgSrc) => {
       // imgSrc: /uploads/images/filename.png hoặc tên file
       const fileName = path.basename(imgSrc);
@@ -69,12 +70,17 @@ class ExamExportService {
         ext
       });
 
+      // Đọc kích thước thật (pixels) và tính toán kích thước EMU chuẩn xác không bị méo tỷ lệ
+      const dims = getImageDimensions(imgBuffer);
+      const { cx, cy } = calculateWordEmuSize(dims?.width || 500, dims?.height || 350);
+
       return `
 <w:p>
+  <w:pPr><w:jc w:val="center"/></w:pPr>
   <w:r>
     <w:drawing>
       <wp:inline distT="0" distB="0" distL="0" distR="0" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">
-        <wp:extent cx="3600000" cy="2400000"/>
+        <wp:extent cx="${cx}" cy="${cy}"/>
         <wp:docPr id="${imgCounter}" name="Hình ảnh ${imgCounter}"/>
         <a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
           <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
@@ -88,7 +94,7 @@ class ExamExportService {
                 <a:stretch><a:fillRect/></a:stretch>
               </pic:blipFill>
               <pic:spPr>
-                <a:xfrm><a:off x="0" y="0"/><a:ext cx="3600000" cy="2400000"/></a:xfrm>
+                <a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>
                 <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
               </pic:spPr>
             </pic:pic>

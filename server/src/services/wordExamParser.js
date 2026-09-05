@@ -5,6 +5,7 @@ const path = require('node:path');
 const JSZip = require('jszip');
 const { DOMParser } = require('@xmldom/xmldom');
 const { parseOMMLNode } = require('./ommlToLatex');
+const { autoFormatMathInContent } = require('./unicodeMathToLatex');
 const { normalizeTrueFalseMap } = require('./trueFalseUtils');
 
 /**
@@ -213,12 +214,11 @@ class WordExamParser {
       return latex ? ` ${latex} ` : '';
     }
 
-    if (tag === 'drawing' || tag === 'pict') {
+    if (tag === 'drawing' || tag === 'pict' || tag === 'object' || tag === 'shape' || tag === 'imagedata' || tag === 'graphic') {
       const rId = this.findEmbedId(node);
       if (rId && relMap && relMap[rId]) {
         return `\n![Hình ảnh](${relMap[rId]})\n`;
       }
-      return '';
     }
 
     if (tag === 't') {
@@ -244,14 +244,18 @@ class WordExamParser {
     if (!element || !element.attributes) return null;
     for (let i = 0; i < element.attributes.length; i++) {
       const attr = element.attributes[i];
+      const name = (attr.name || attr.localName || '').toLowerCase();
       if (
-        attr.name === 'r:embed' ||
-        attr.name === 'embed' ||
-        attr.name === 'r:id' ||
-        attr.localName === 'embed' ||
-        attr.localName === 'id'
+        name === 'r:embed' ||
+        name === 'embed' ||
+        name === 'r:id' ||
+        name === 'id' ||
+        name === 'o:relid' ||
+        name === 'relid'
       ) {
-        return attr.value;
+        if (attr.value && (attr.value.startsWith('rId') || attr.value.startsWith('RId') || attr.value.startsWith('rIdImg'))) {
+          return attr.value;
+        }
       }
     }
     for (let child = element.firstChild; child; child = child.nextSibling) {
@@ -639,8 +643,13 @@ class WordExamParser {
       }
     }
 
-    q.content = this.autoFenceCodeInText(q.content.trim());
-    if (q.rubric_guide) q.rubric_guide = this.autoFenceCodeInText(q.rubric_guide.trim());
+    q.content = this.autoFenceCodeInText(autoFormatMathInContent(q.content.trim()));
+    if (q.rubric_guide) q.rubric_guide = this.autoFenceCodeInText(autoFormatMathInContent(q.rubric_guide.trim()));
+    if (Array.isArray(q.options)) {
+      q.options.forEach(opt => {
+        if (opt.text) opt.text = autoFormatMathInContent(opt.text.trim());
+      });
+    }
 
     questionsList.push(q);
   }
