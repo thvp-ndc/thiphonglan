@@ -124,10 +124,10 @@ export default function ResultsExport({ sessionId, onSelectSession, onBack, onOp
 
           <button
             onClick={() => setIsBatchPrinting(true)}
-            className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition shadow flex items-center gap-1.5"
-            title="Xem và in toàn bộ bài thi của tất cả học sinh trong ca thi này"
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition shadow-lg flex items-center gap-2 border border-indigo-400/30"
+            title="Xuất toàn bộ bài làm của tất cả thí sinh trong ca thi này dưới dạng PDF phục vụ công tác lưu trữ hồ sơ"
           >
-            <Printer className="w-4 h-4" /> In Toàn Bộ Bài Làm (Cả Ca)
+            <FileText className="w-4 h-4 text-indigo-200" /> Xuất Toàn Bộ Bài Làm (PDF Lưu Trữ)
           </button>
 
           <button
@@ -222,7 +222,7 @@ export default function ResultsExport({ sessionId, onSelectSession, onBack, onOp
                   <th className="py-3 px-4 text-center">Trạng Thái Chấm</th>
                   <th className="py-3 px-4 text-center">Số Lỗi Vi Phạm</th>
                   <th className="py-3 px-4">Thời Gian Nộp</th>
-                  <th className="py-3 px-4 text-center">Bài Làm</th>
+                  <th className="py-3 px-4 text-center w-36">Bài Làm & PDF</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-700/60">
@@ -264,10 +264,10 @@ export default function ResultsExport({ sessionId, onSelectSession, onBack, onOp
                       <td className="py-3 px-4 text-center">
                         <button
                           onClick={() => setViewingAttemptId(st.id)}
-                          className="px-2.5 py-1.5 bg-sky-950 hover:bg-sky-900 text-sky-300 border border-sky-800 rounded-lg text-xs font-semibold transition flex items-center gap-1 mx-auto"
-                          title="Xem chi tiết bài làm, in ấn A4 hoặc tải file HTML"
+                          className="px-3 py-1.5 bg-sky-950 hover:bg-sky-900 text-sky-300 border border-sky-800 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 mx-auto shadow-sm"
+                          title="Xem chi tiết bài làm, in ấn A4 hoặc xuất file PDF lưu trữ"
                         >
-                          <FileText className="w-3.5 h-3.5" /> Xem Bài Làm
+                          <Printer className="w-3.5 h-3.5 text-sky-400" /> Xem & Xuất PDF
                         </button>
                       </td>
                     </tr>

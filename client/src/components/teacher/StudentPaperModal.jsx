@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Printer,
+  ExternalLink,
   Download,
   X,
   Award,
@@ -85,7 +86,70 @@ export default function StudentPaperModal({ attemptId, sessionId, isBatchMode = 
     fetchData();
   }, [attemptId, sessionId, isBatchMode]);
 
-  const handlePrint = () => {
+    const handleOpenNewWindowPrint = () => {
+    const printArea = document.getElementById('printable-exam-paper');
+    if (!printArea) return;
+    const win = window.open('', '_blank');
+    if (!win) {
+      alert('Vui lòng cho phép trình duyệt mở popup để xem trang in.');
+      return;
+    }
+    const sessionCode = data?.session?.session_code || sessionId || '';
+    const studentInfo = isBatchMode ? 'ToanBoCaThi_' + sessionCode : (data?.attempt?.student_code || '') + '_' + (data?.attempt?.student_name || '');
+    const title = `[LuuTru]_${sessionCode}_${studentInfo}_BaiLamThiSinh`;
+    win.document.write(`<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>${title}</title>
+  <style>
+    @page { size: A4 portrait; margin: 12mm 15mm 15mm 15mm; }
+    * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    body { margin: 0; padding: 20px; font-family: 'Times New Roman', Times, serif; color: #111827; background: #fff; line-height: 1.45; font-size: 13pt; }
+    @media print {
+      body { padding: 0; }
+      .no-print-toolbar { display: none !important; }
+    }
+    .no-print-toolbar {
+      position: sticky; top: 10px; z-index: 999;
+      background: #0f172a; color: #fff; padding: 12px 20px;
+      border-radius: 12px; margin-bottom: 25px;
+      display: flex; justify-content: space-between; align-items: center;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.3); font-family: system-ui, -apple-system, sans-serif;
+    }
+    .print-paper-sheet {
+      max-width: 100% !important; margin: 0 0 30px 0 !important;
+      padding: 0 !important; page-break-after: always !important; break-after: page !important;
+    }
+    .print-paper-sheet:last-child { page-break-after: auto !important; break-after: auto !important; }
+    .print-question-item { page-break-inside: avoid !important; break-inside: avoid !important; margin-bottom: 12px; }
+  </style>
+</head>
+<body>
+  <div class="no-print-toolbar">
+    <div>
+      <strong style="font-size: 15px;">Hồ Sơ Lưu Trữ Bài Thi - ${isBatchMode ? 'Toàn Bộ Ca Thi (' + (data?.papers?.length || 0) + ' thí sinh)' : data?.attempt?.student_name}</strong>
+      <div style="font-size: 12px; color: #94a3b8; margin-top: 2px;">Nhấn nút bên phải hoặc bấm phím <strong>Ctrl + P</strong> để lưu file PDF khổ A4</div>
+    </div>
+    <button onclick="window.print()" style="background: #0284c7; color: white; border: none; padding: 8px 18px; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 13px;">
+      🖨️ In & Lưu Thành PDF (A4)
+    </button>
+  </div>
+  ${printArea.innerHTML}
+</body>
+</html>`);
+    win.document.close();
+    const styleNodes = document.querySelectorAll('link[rel="stylesheet"], style');
+    styleNodes.forEach(node => {
+      if (node.tagName === 'LINK' || (node.tagName === 'STYLE' && node.id !== 'print-isolation-style')) {
+        try {
+          win.document.head.appendChild(node.cloneNode(true));
+        } catch (e) {}
+      }
+    });
+  };
+
+const handlePrint = () => {
     const printArea = document.getElementById('printable-exam-paper');
     if (!printArea) {
       window.print();
@@ -807,17 +871,24 @@ export default function StudentPaperModal({ attemptId, sessionId, isBatchMode = 
           </button>
           <button
             onClick={handlePrint}
-            className="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white font-bold rounded-xl text-xs transition shadow flex items-center gap-1.5"
-            title="Mở hộp thoại In của máy tính hoặc Lưu file PDF"
+            className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs transition shadow-lg flex items-center gap-1.5 border border-rose-400/30"
+            title="Mở hộp thoại In của máy tính và lưu bài làm dưới dạng tệp PDF khổ A4"
           >
-            <Printer className="w-4 h-4" /> In Bài Làm / PDF (A4)
+            <Printer className="w-4 h-4" /> Xuất / Lưu File PDF (A4)
+          </button>
+          <button
+            onClick={handleOpenNewWindowPrint}
+            className="px-3.5 py-2 bg-sky-700 hover:bg-sky-600 text-white font-semibold rounded-xl text-xs transition shadow flex items-center gap-1.5"
+            title="Mở toàn bộ bài thi trong tab mới để xem toàn màn hình và in/lưu PDF"
+          >
+            <ExternalLink className="w-4 h-4" /> Mở Tab In Trực Tiếp
           </button>
           <button
             onClick={handleDownloadHtml}
             className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-600 text-white font-semibold rounded-xl text-xs transition shadow flex items-center gap-1.5"
-            title="Tải về file HTML độc lập mở offline mọi nơi"
+            title="Tải về tệp HTML độc lập chứa đầy đủ công thức toán và bài làm để lưu trữ offline"
           >
-            <Download className="w-4 h-4" /> Tải File HTML
+            <Download className="w-4 h-4" /> Tải File HTML Lưu Trữ
           </button>
           <button
             onClick={onClose}
@@ -826,6 +897,16 @@ export default function StudentPaperModal({ attemptId, sessionId, isBatchMode = 
           >
             <X className="w-5 h-5" />
           </button>
+        </div>
+      </div>
+
+      {/* Hướng dẫn lưu file PDF */}
+      <div className="max-w-4xl mx-auto mb-6 bg-sky-950/60 border border-sky-800/80 rounded-xl p-3.5 text-xs text-sky-200 flex items-center justify-between gap-3 shadow-md print:hidden">
+        <div className="flex items-center gap-2.5">
+          <span className="p-1.5 bg-sky-900 text-sky-300 rounded-lg font-bold">💡</span>
+          <span>
+            <strong>Hướng dẫn lưu trữ file PDF:</strong> Khi bấm <strong>"Xuất / Lưu File PDF (A4)"</strong>, tại mục <strong>Máy in (Destination)</strong> của trình duyệt ➔ Chọn <strong>"Lưu dưới dạng PDF" (Save as PDF)</strong> ➔ Đặt khổ giấy <strong>A4</strong> ➔ Nhấn <strong>Lưu (Save)</strong>.
+          </span>
         </div>
       </div>
 
