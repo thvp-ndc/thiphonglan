@@ -8,6 +8,7 @@ const { Server } = require('socket.io');
 const apiRoutes = require('./routes/api');
 const { setupSocketIO } = require('./services/socketHandler');
 const { UdpDiscoveryService, getLocalIpAddress } = require('./services/udpDiscovery');
+const { LanDomainService, PRIMARY_DOMAIN } = require('./services/lanDomainService');
 
 const app = express();
 const server = http.createServer(app);
@@ -23,6 +24,11 @@ const io = new Server(server, {
 
 app.set('port', PORT);
 app.set('io', io);
+
+// Start LAN Domain Service (LLMNR, mDNS, DNS UDP 53, Port 80 Redirector)
+const lanDomainService = new LanDomainService(PORT);
+app.set('lanDomainService', lanDomainService);
+lanDomainService.start();
 
 // Middlewares
 app.use(cors());
@@ -86,6 +92,7 @@ app.get('*', (req, res, next) => {
           <h1>Máy Chủ Thi Trực Tiếp Qua Mạng LAN</h1>
           <p>Hệ thống máy chủ đã sẵn sàng phục vụ phòng máy thi trắc nghiệm và tự luận.</p>
           <div class="info-box">
+            <p>🌐 <strong>Tên miền học sinh:</strong> <code>http://${PRIMARY_DOMAIN}:${PORT}/student</code> hoặc <code>http://${PRIMARY_DOMAIN}/student</code></p>
             <p>🌐 <strong>Địa chỉ máy chủ LAN:</strong> <code>http://${localIp}:${PORT}</code></p>
             <p>📡 <strong>Tín hiệu UDP Beacon:</strong> Đang phát sóng định kỳ trên cổng <code>41234</code></p>
             <p>💾 <strong>Cơ sở dữ liệu:</strong> SQLite WAL mode (File: <code>data/exam_master.db</code>)</p>
@@ -107,13 +114,15 @@ server.listen(PORT, () => {
   console.log('====================================================');
   console.log(`[LAN EXAM SERVER] Running at port ${PORT} (IPv4 + IPv6 Dual-Stack)`);
   console.log(`[TEACHER ACCESS] http://localhost:${PORT}/teacher hoặc http://127.0.0.1:${PORT}/teacher`);
-  console.log(`[STUDENT ACCESS] http://${localIp}:${PORT}/student`);
+  console.log(`[STUDENT DOMAIN] http://${PRIMARY_DOMAIN}:${PORT}/student (hoặc http://${PRIMARY_DOMAIN}/student)`);
+  console.log(`[STUDENT IP LAN] http://${localIp}:${PORT}/student`);
   console.log('====================================================');
 });
 
 process.on('SIGINT', () => {
   console.log('\n[SERVER] Shutting down gracefully...');
   udpBeacon.stop();
+  lanDomainService.stop();
   server.close(() => {
     console.log('[SERVER] Stopped.');
     process.exit(0);

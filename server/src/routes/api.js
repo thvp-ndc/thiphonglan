@@ -12,14 +12,43 @@ const { calculateTrueFalseScore } = require('../services/trueFalseUtils');
 const { getLocalIpAddress } = require('../services/udpDiscovery');
 const crypto = require('node:crypto');
 
-// 1. SYSTEM INFO
+// 1. SYSTEM INFO & DOMAIN MANAGEMENT
 router.get('/system/info', (req, res) => {
+  const lanDomainService = req.app.get('lanDomainService');
+  const domainInfo = lanDomainService ? lanDomainService.getDomainInfo() : null;
   res.json({
     success: true,
     serverIp: getLocalIpAddress(),
     port: req.app.get('port') || 3000,
+    primaryDomain: 'thionline.ndc',
+    domainInfo,
+    studentDomainUrl: `http://thionline.ndc:${req.app.get('port') || 3000}/student`,
     timestamp: new Date().toISOString()
   });
+});
+
+router.get('/system/download-launcher', (req, res) => {
+  try {
+    const lanDomainService = req.app.get('lanDomainService');
+    const htmlContent = lanDomainService ? lanDomainService.generateHtmlLauncher() : '';
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="ThiOnline_NDC.html"');
+    res.send(htmlContent);
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.get('/system/download-bat', (req, res) => {
+  try {
+    const lanDomainService = req.app.get('lanDomainService');
+    const batContent = lanDomainService ? lanDomainService.generateBatInstaller() : '';
+    res.setHeader('Content-Type', 'application/x-bat');
+    res.setHeader('Content-Disposition', 'attachment; filename="CaiDatPhongMay_NDC.bat"');
+    res.send(batContent);
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
 });
 
 // 2. EXAMS

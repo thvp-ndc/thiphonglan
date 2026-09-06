@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { io } from 'socket.io-client';
-import { ShieldAlert, Users, Clock, AlertTriangle, CheckCircle, RefreshCw, PlusCircle, StopCircle, ArrowLeft, Laptop, Play, KeyRound } from 'lucide-react';
+import { ShieldAlert, Users, Clock, AlertTriangle, CheckCircle, RefreshCw, PlusCircle, StopCircle, ArrowLeft, Laptop, Play, KeyRound, Globe, Copy, Check, Download } from 'lucide-react';
 
 export default function LiveMonitor({ sessionId, onBack, onOpenEssayGrading, onOpenResults }) {
   const [session, setSession] = useState(null);
@@ -12,6 +12,15 @@ export default function LiveMonitor({ sessionId, onBack, onOpenEssayGrading, onO
   const [extraMinutes, setExtraMinutes] = useState(5);
   const [startingExam, setStartingExam] = useState(false);
   const [remainingSeconds, setRemainingSeconds] = useState(0);
+  const [serverInfo, setServerInfo] = useState({ serverIp: '...', port: 3000, primaryDomain: 'thionline.ndc' });
+  const [copiedLink, setCopiedLink] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/system/info')
+      .then(r => r.json())
+      .then(d => { if (d.success) setServerInfo(d); })
+      .catch(() => {});
+  }, []);
 
   const calculateRemainingSeconds = (sess) => {
     if (!sess || !sess.duration_minutes) return 0;
@@ -397,6 +406,52 @@ export default function LiveMonitor({ sessionId, onBack, onOpenEssayGrading, onO
           </button>
         </div>
       )}
+
+      {/* Student Access Instructions Banner */}
+      <div className="bg-slate-900/90 border border-slate-700/80 rounded-xl p-4 flex flex-wrap items-center justify-between gap-4 shadow-md">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-emerald-950/90 text-emerald-400 rounded-xl border border-emerald-800/80">
+            <Globe className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-400 font-medium">Học sinh mở trình duyệt gõ tên miền:</span>
+              <span className="px-2 py-0.5 bg-emerald-950 text-emerald-300 border border-emerald-700/80 rounded font-mono font-bold text-sm select-all">
+                http://{serverInfo.primaryDomain || 'thionline.ndc'}:{serverInfo.port || 3000}
+              </span>
+              <span className="text-xs text-slate-500 font-mono">(hoặc IP: {serverInfo.serverIp}:{serverInfo.port})</span>
+            </div>
+            <div className="text-xs text-slate-300 mt-1 flex items-center gap-2">
+              <span>Mã Ca Thi: <strong className="text-amber-300 font-mono font-bold bg-amber-950/60 px-1.5 py-0.5 rounded border border-amber-800/60">{session?.session_code}</strong></span>
+              <span>•</span>
+              <span className="text-slate-400">Học sinh chỉ cần nhập SBD, hệ thống sẽ tự động xác thực danh tính.</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              const url = `http://${serverInfo.primaryDomain || 'thionline.ndc'}:${serverInfo.port || 3000}/student`;
+              navigator.clipboard.writeText(url);
+              setCopiedLink(true);
+              setTimeout(() => setCopiedLink(false), 2000);
+            }}
+            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold transition flex items-center gap-1.5"
+          >
+            {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+            {copiedLink ? 'Đã chép link' : 'Sao chép link'}
+          </button>
+          <a
+            href="/api/system/download-launcher"
+            download="ThiOnline_NDC.html"
+            className="px-3 py-1.5 bg-sky-950/80 hover:bg-sky-900/80 text-sky-300 border border-sky-800/80 rounded-lg text-xs font-semibold transition flex items-center gap-1.5"
+            title="Tải file mở phòng thi tự động đặt trên màn hình học sinh"
+          >
+            <Download className="w-3.5 h-3.5" /> Tải Shortcut Máy Con
+          </a>
+        </div>
+      </div>
 
       {/* Realtime KPI Bar */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">

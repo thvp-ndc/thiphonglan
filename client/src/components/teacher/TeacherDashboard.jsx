@@ -4,12 +4,14 @@ import LiveMonitor from './LiveMonitor';
 import EssayGrading from './EssayGrading';
 import ResultsExport from './ResultsExport';
 import StudentManager from './StudentManager';
-import { BookOpen, Laptop, FileEdit, Award, Wifi, Users } from 'lucide-react';
+import { BookOpen, Laptop, FileEdit, Award, Wifi, Users, Globe, Copy, Check, Download, QrCode, X } from 'lucide-react';
 
 export default function TeacherDashboard() {
   const [currentTab, setCurrentTab] = useState('exams'); // 'exams', 'students', 'monitor', 'grading', 'results'
   const [activeSessionId, setActiveSessionId] = useState(null);
-  const [serverInfo, setServerInfo] = useState({ serverIp: '...', port: 3000 });
+  const [serverInfo, setServerInfo] = useState({ serverIp: '...', port: 3000, primaryDomain: 'thionline.ndc' });
+  const [showDomainModal, setShowDomainModal] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     fetch('/api/system/info')
@@ -35,25 +37,39 @@ export default function TeacherDashboard() {
     setCurrentTab('results');
   };
 
+  const studentDomainUrl = serverInfo.studentDomainUrl || `http://${serverInfo.primaryDomain || 'thionline.ndc'}:${serverInfo.port || 3000}/student`;
+
+  const handleCopyLink = () => {
+    navigator.clipboard.writeText(studentDomainUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
       {/* Top Navbar */}
-      <header className="bg-slate-900 border-b border-slate-800 sticky top-0 z-40 px-6 py-3.5 flex flex-wrap items-center justify-between gap-4 print:hidden">
+      <header className="bg-slate-900 border-b border-slate-800 sticky top-0 z-40 px-6 py-3 flex flex-wrap items-center justify-between gap-4 print:hidden">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-sky-600 to-indigo-600 flex items-center justify-center font-bold text-white shadow-lg">
-            LAN
+            NDC
           </div>
           <div>
             <h1 className="font-bold text-white text-base tracking-wide flex items-center gap-2">
-              Hệ Thống Thi Máy Tính Mạng LAN <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-sky-950 text-sky-400 border border-sky-800 font-mono">Giáo Viên</span>
+              Hệ Thống Khảo Thí Mạng LAN <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-sky-950 text-sky-400 border border-sky-800 font-mono">Giáo Viên</span>
             </h1>
-            <p className="text-xs text-slate-400 flex items-center gap-2">
-              <span className="flex items-center gap-1 text-emerald-400">
-                <Wifi className="w-3.5 h-3.5" /> Máy Chủ: <strong>{serverInfo.serverIp}:{serverInfo.port}</strong>
-              </span>
+            <div className="text-xs text-slate-400 flex flex-wrap items-center gap-2 mt-0.5">
+              <button
+                onClick={() => setShowDomainModal(true)}
+                className="flex items-center gap-1.5 px-2 py-0.5 bg-emerald-950/80 hover:bg-emerald-900/80 text-emerald-300 border border-emerald-700/60 rounded-md font-mono transition"
+                title="Bấm để xem hướng dẫn và tải lối tắt tên miền cho học sinh"
+              >
+                <Globe className="w-3.5 h-3.5 text-emerald-400" /> Tên miền: <strong>{serverInfo.primaryDomain || 'thionline.ndc'}</strong>
+              </button>
               <span>•</span>
-              <span>Cơ sở dữ liệu: SQLite WAL</span>
-            </p>
+              <span className="flex items-center gap-1 text-slate-400">
+                <Wifi className="w-3.5 h-3.5" /> IP: <strong>{serverInfo.serverIp}:{serverInfo.port}</strong>
+              </span>
+            </div>
           </div>
         </div>
 
@@ -107,14 +123,22 @@ export default function TeacherDashboard() {
           </button>
         </div>
 
-        <a
-          href="/student"
-          target="_blank"
-          rel="noreferrer"
-          className="text-xs px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700 transition"
-        >
-          Mở Màn Hình Thí Sinh ↗
-        </a>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowDomainModal(true)}
+            className="text-xs px-3 py-1.5 bg-emerald-900/60 hover:bg-emerald-800 text-emerald-200 rounded-lg border border-emerald-700/60 transition flex items-center gap-1.5 font-medium"
+          >
+            <Globe className="w-3.5 h-3.5" /> Tên Miền Thi
+          </button>
+          <a
+            href="/student"
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700 transition"
+          >
+            Mở Màn Hình Thí Sinh ↗
+          </a>
+        </div>
       </header>
 
       {/* Main View Area */}
@@ -152,6 +176,97 @@ export default function TeacherDashboard() {
           />
         )}
       </main>
+
+      {/* Modal Tên Miền & Lối Tắt Phòng Thi */}
+      {showDomainModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl relative">
+            <button
+              onClick={() => setShowDomainModal(false)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-3 bg-emerald-950 text-emerald-400 rounded-xl border border-emerald-800">
+                <Globe className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-bold text-white text-lg">Tên Miền Đăng Nhập Học Sinh</h3>
+                <p className="text-xs text-slate-400">Tự động gắn IP máy giáo viên trong toàn mạng LAN</p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl">
+                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">
+                  Đường dẫn học sinh gõ trên trình duyệt:
+                </label>
+                <div className="flex items-center gap-2 mt-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={studentDomainUrl}
+                    className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-emerald-400 font-mono font-bold text-sm focus:outline-none"
+                  />
+                  <button
+                    onClick={handleCopyLink}
+                    className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5"
+                  >
+                    {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                    {copied ? 'Đã chép' : 'Sao chép'}
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-2">
+                  💡 Học sinh có thể gõ ngắn gọn: <strong className="text-white font-mono">{serverInfo.primaryDomain || 'thionline.ndc'}:{serverInfo.port || 3000}</strong> hoặc <strong className="text-white font-mono">{serverInfo.primaryDomain || 'thionline.ndc'}</strong>
+                </p>
+              </div>
+
+              <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl">
+                <h4 className="text-xs font-bold text-slate-300 uppercase mb-2">
+                  Tải file Lối Tắt cài sẵn cho máy học sinh (1-Click):
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
+                  <a
+                    href="/api/system/download-launcher"
+                    download="ThiOnline_NDC.html"
+                    className="p-3 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-left transition flex items-center gap-2.5 group"
+                  >
+                    <Download className="w-4 h-4 text-sky-400 group-hover:scale-110 transition" />
+                    <div>
+                      <div className="text-xs font-bold text-white">File ThiOnline.html</div>
+                      <div className="text-[10px] text-slate-400">Tự động dò IP & mở thi</div>
+                    </div>
+                  </a>
+
+                  <a
+                    href="/api/system/download-bat"
+                    download="CaiDatPhongMay_NDC.bat"
+                    className="p-3 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-left transition flex items-center gap-2.5 group"
+                  >
+                    <Download className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition" />
+                    <div>
+                      <div className="text-xs font-bold text-white">File Cài Đặt Desktop .bat</div>
+                      <div className="text-[10px] text-slate-400">Tạo icon Desktop máy con</div>
+                    </div>
+                  </a>
+                </div>
+              </div>
+
+              <div className="text-center pt-2">
+                <button
+                  onClick={() => setShowDomainModal(false)}
+                  className="px-6 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl transition"
+                >
+                  Đóng Cửa Sổ
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
