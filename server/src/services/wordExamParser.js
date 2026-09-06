@@ -163,8 +163,8 @@ class WordExamParser {
       if (child.nodeType !== 1) continue;
       const tag = child.localName || child.nodeName.split(':').pop();
 
-      if (tag === 'p') {
-        const isCode = this.isCodeParagraph(child);
+      if (tag === 'p' || tag === 'oMathPara' || tag === 'oMath') {
+        const isCode = tag === 'p' ? this.isCodeParagraph(child) : false;
         const pText = this.extractNodeText(child, relMap).trimEnd();
         if (pText.trim()) {
           rawParagraphs.push({ text: pText, isCode });
@@ -204,7 +204,7 @@ class WordExamParser {
 
       const isHtml = /<!DOCTYPE|<html|<body|<div|<table|<tr|<td|<form|<style|<script|<\//i.test(joinedCode);
       const lang = isHtml ? 'html' : 'python';
-      finalParagraphs.push(```${lang}\n${joinedCode}\n```);
+      finalParagraphs.push(`\`\`\`${lang}\n${joinedCode}\n\`\`\``);
     };
 
     for (let i = 0; i < rawParagraphs.length; i++) {
@@ -219,6 +219,37 @@ class WordExamParser {
     flushCodeBuffer();
 
     return finalParagraphs;
+  }
+
+  findAllEmbedIds(element) {
+    const ids = [];
+    if (!element) return ids;
+
+    const traverse = (el) => {
+      if (el.attributes) {
+        for (let i = 0; i < el.attributes.length; i++) {
+          const attr = el.attributes[i];
+          const name = (attr.name || attr.localName || '').toLowerCase();
+          if (
+            name === 'r:embed' ||
+            name === 'embed' ||
+            name === 'r:id' ||
+            name === 'id' ||
+            name === 'o:relid' ||
+            name === 'relid'
+          ) {
+            if (attr.value && (attr.value.startsWith('rId') || attr.value.startsWith('RId') || attr.value.startsWith('rIdImg'))) {
+              if (!ids.includes(attr.value)) ids.push(attr.value);
+            }
+          }
+        }
+      }
+      for (let child = el.firstChild; child; child = child.nextSibling) {
+        if (child.nodeType === 1) traverse(child);
+      }
+    };
+    traverse(element);
+    return ids;
   }
 
   extractNodeText(node, relMap) {
@@ -236,18 +267,22 @@ class WordExamParser {
 
     // 2. Hình ảnh hoặc đối tượng nhúng MathType OLE / DrawingML / VML
     if (tag === 'drawing' || tag === 'pict' || tag === 'object' || tag === 'shape' || tag === 'imagedata' || tag === 'graphic') {
-      const rId = this.findEmbedId(node);
-      if (rId && relMap && relMap[rId]) {
-        const mediaInfo = relMap[rId];
-        // Nếu đối tượng là công thức MathType
-        if (mediaInfo.isMath && mediaInfo.latex) {
-          return ` ${mediaInfo.latex} `;
+      const embedIds = this.findAllEmbedIds(node);
+      // Ưu tiên 1: Tìm bất kỳ đối tượng nhúng nào là công thức MathType
+      for (const rId of embedIds) {
+        if (relMap && relMap[rId] && relMap[rId].isMath && relMap[rId].latex) {
+          return ` ${relMap[rId].latex} `;
         }
+      }
 
-        // Nếu là ảnh thông thường -> Đọc kích thước hiển thị (DrawingML extent hoặc VML style)
-        const dims = this.extractImageDisplayDimensions(node);
-        const imgMd = formatImageMarkdown('Hình ảnh', mediaInfo.url, dims.width, dims.height);
-        return `\n${imgMd}\n`;
+      // Ưu tiên 2: Tìm ảnh thông thường
+      for (const rId of embedIds) {
+        if (relMap && relMap[rId] && !relMap[rId].isMath) {
+          const mediaInfo = relMap[rId];
+          const dims = this.extractImageDisplayDimensions(node);
+          const imgMd = formatImageMarkdown('Hình ảnh', mediaInfo.url, dims.width, dims.height);
+          return `\n${imgMd}\n`;
+        }
       }
     }
 
@@ -399,8 +434,8 @@ class WordExamParser {
     const part3Regex = /^\s*(?:PHẦN|Phần)\s*(?:III|3|C)?[.:\s-]*(?:CÂU\s+(?:HỎI\s+)?)?(?:TỰ|TƯ|TU)\s*LUẬN/i;
 
     const questionHeaderRegex = /^\s*(?:Câu|CÂU|Bài|BÀI)\s*(\d+)[\s:.-]+(.*)/i;
-    const mcqOptionRegex = /^\s*([*]?[A-D][*]?|[A-D]\*|\([A-D]\)|\[[A-D]\])[\s:.)-]+(.*)/;
-    const tfSubItemRegex = /^\s*([*]?[a-d][*]?|[a-d]\*|\([a-d]\)|\[[a-d]\])[\s:.)-]+(.*)/;
+    const mcqOptionRegex = /^\s*([*]?[A-D][*]?|[A-D]\*|\([A-D]\)|\[[A-D]\])(?:[.):\-]|(?<=\])\s*|(?<=\))\s*)\s*(.*)/;
+    const tfSubItemRegex = /^\s*([*]?[a-d][*]?|[a-d]\*|\([a-d]\)|\[[a-d]\])(?:[.):\-]|(?<=\])\s*|(?<=\))\s*)\s*(.*)/;
     const answerTagRegex = /^\s*(?:Đáp án|ĐA|Đáp án đúng|ĐÁP ÁN)[\s:.-]*(.*)/i;
     const scoreRegex = /\((\d+(?:[,.]\d+)?)\s*(?:điểm|đ|d)\)/i;
 
@@ -619,10 +654,11 @@ class WordExamParser {
       return [line];
     }
 
-    const pattern = /(?:^|\s+)((?:[*]?)[A-D][*]?|[A-D]\*|\([A-D]\)|\[[A-D]\])[\s:.)-]+/g;
+    // Tách phương án nội dòng khi có ít nhất 2 phương án trở lên (A. B. C. D. hoặc A) B) C) D.)
+    const pattern = /(?:^|[\s\t]+)((?:[*]?)[A-D][*]?|[A-D]\*|\([A-D]\)|\[[A-D]\])(?:[.):\-]|(?<=\])|(?<=\)))\s+/g;
     const matches = [...line.matchAll(pattern)];
 
-    if (matches.length >= 2 && matches[0].index === 0) {
+    if (matches.length >= 2 && matches[0].index === line.search(/\S/)) {
       const parts = [];
       for (let i = 0; i < matches.length; i++) {
         const start = matches[i].index;
