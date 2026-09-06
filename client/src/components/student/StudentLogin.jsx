@@ -1,36 +1,44 @@
 import React, { useState, useEffect } from 'react';
-import { Laptop, ShieldCheck, UserCheck, KeyRound, AlertCircle, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { Laptop, ShieldCheck, UserCheck, KeyRound, AlertCircle, ArrowRight, CheckCircle2, Loader2 } from 'lucide-react';
 
 export default function StudentLogin({ onLoginSuccess }) {
-  const [sessionCode, setSessionCode] = useState('PHONG-01');
+  const [sessionCode, setSessionCode] = useState('');
   const [studentCode, setStudentCode] = useState('');
   const [studentName, setStudentName] = useState('');
   const [className, setClassName] = useState('');
   const [isAutoIdentified, setIsAutoIdentified] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   // Auto-lookup student details when SBD is typed
   useEffect(() => {
     const code = studentCode.trim().toUpperCase();
-    if (!code || code.length < 3) {
+    if (!code) {
       setIsAutoIdentified(false);
+      setIsSearching(false);
       return;
     }
 
+    setIsSearching(true);
     const timer = setTimeout(async () => {
       try {
         const res = await fetch(`/api/students/lookup/${encodeURIComponent(code)}`);
         const data = await res.json();
         if (data.success && data.found && data.student) {
-          setStudentName(data.student.student_name);
+          setStudentName(data.student.student_name || '');
           setClassName(data.student.class_name || '');
           setIsAutoIdentified(true);
+          setError('');
         } else {
           setIsAutoIdentified(false);
         }
-      } catch (e) {}
-    }, 400);
+      } catch (e) {
+        setIsAutoIdentified(false);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 250);
 
     return () => clearTimeout(timer);
   }, [studentCode]);
@@ -52,7 +60,7 @@ export default function StudentLogin({ onLoginSuccess }) {
 
   const handleLogin = async (e) => {
     e.preventDefault();
-    if (!sessionCode || !studentCode || !studentName) {
+    if (!sessionCode.trim() || !studentCode.trim() || !studentName.trim()) {
       setError('Vui lòng điền đầy đủ Mã ca thi, Số báo danh và Họ tên.');
       return;
     }
@@ -67,10 +75,10 @@ export default function StudentLogin({ onLoginSuccess }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          sessionCode: sessionCode.trim(),
+          sessionCode: sessionCode.trim().toUpperCase(),
           studentCode: studentCode.trim().toUpperCase(),
           studentName: studentName.trim(),
-          className: className.trim()
+          className: className.trim().toUpperCase()
         })
       });
 
@@ -121,8 +129,8 @@ export default function StudentLogin({ onLoginSuccess }) {
                 type="text"
                 value={sessionCode}
                 onChange={e => setSessionCode(e.target.value.toUpperCase())}
-                placeholder="Ví dụ: PHONG-01"
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2.5 pl-10 pr-3 text-white font-mono font-bold uppercase focus:border-sky-500 focus:outline-none text-sm"
+                placeholder="Nhập mã ca thi..."
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2.5 pl-10 pr-3 text-white font-mono font-bold uppercase focus:border-sky-500 focus:outline-none text-sm placeholder:text-slate-600"
                 required
               />
             </div>
@@ -136,15 +144,34 @@ export default function StudentLogin({ onLoginSuccess }) {
                 type="text"
                 value={studentCode}
                 onChange={e => setStudentCode(e.target.value.toUpperCase())}
-                placeholder="Ví dụ: SBD001"
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2.5 pl-10 pr-3 text-white font-mono font-bold uppercase focus:border-sky-500 focus:outline-none text-sm"
+                placeholder="Nhập số báo danh..."
+                className={`w-full bg-slate-950 border ${isAutoIdentified ? 'border-emerald-500/80 ring-1 ring-emerald-500/30' : 'border-slate-800'} rounded-xl py-2.5 pl-10 pr-10 text-white font-mono font-bold uppercase focus:border-sky-500 focus:outline-none text-sm placeholder:text-slate-600`}
                 required
               />
+              {isSearching && (
+                <Loader2 className="w-4 h-4 text-sky-400 animate-spin absolute right-3 top-3" />
+              )}
+              {isAutoIdentified && !isSearching && (
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 absolute right-3 top-3" />
+              )}
             </div>
+
+            {/* Thông tin học sinh tự động nhận diện */}
             {isAutoIdentified && (
-              <p className="text-[11px] text-emerald-400 mt-1 flex items-center gap-1">
-                <CheckCircle2 className="w-3.5 h-3.5" /> Đã nhận diện học sinh trong danh sách lớp!
-              </p>
+              <div className="mt-2.5 p-3 bg-emerald-950/40 border border-emerald-500/40 rounded-xl">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400 mb-1">
+                  <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+                  <span>Xác nhận thông tin thí sinh:</span>
+                </div>
+                <div className="text-sm font-bold text-white flex items-center gap-2 pl-5">
+                  <span>{studentName}</span>
+                  {className && (
+                    <span className="px-2 py-0.5 bg-emerald-900/60 text-emerald-300 text-xs rounded-md border border-emerald-700/50">
+                      Lớp {className}
+                    </span>
+                  )}
+                </div>
+              </div>
             )}
           </div>
 
@@ -154,8 +181,8 @@ export default function StudentLogin({ onLoginSuccess }) {
               type="text"
               value={studentName}
               onChange={e => setStudentName(e.target.value)}
-              placeholder="Nguyễn Văn A"
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2.5 px-3 text-white focus:border-sky-500 focus:outline-none text-sm"
+              placeholder="Họ và tên thí sinh..."
+              className={`w-full bg-slate-950 border ${isAutoIdentified ? 'border-emerald-500/40 bg-slate-950/80' : 'border-slate-800'} rounded-xl py-2.5 px-3 text-white focus:border-sky-500 focus:outline-none text-sm placeholder:text-slate-600`}
               required
             />
           </div>
@@ -166,8 +193,8 @@ export default function StudentLogin({ onLoginSuccess }) {
               type="text"
               value={className}
               onChange={e => setClassName(e.target.value)}
-              placeholder="Ví dụ: 10A1"
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2.5 px-3 text-white focus:border-sky-500 focus:outline-none text-sm"
+              placeholder="Lớp / Đơn vị..."
+              className={`w-full bg-slate-950 border ${isAutoIdentified ? 'border-emerald-500/40 bg-slate-950/80' : 'border-slate-800'} rounded-xl py-2.5 px-3 text-white focus:border-sky-500 focus:outline-none text-sm placeholder:text-slate-600`}
             />
           </div>
 
@@ -175,7 +202,7 @@ export default function StudentLogin({ onLoginSuccess }) {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white font-bold rounded-xl text-sm transition shadow-lg shadow-sky-600/30 flex items-center justify-center gap-2"
+              className="w-full py-3 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white font-bold rounded-xl text-sm transition shadow-lg shadow-sky-600/30 flex items-center justify-center gap-2 disabled:opacity-50"
             >
               {loading ? 'Đang xác thực...' : 'Vào Phòng Thi & Làm Bài'}
               <ArrowRight className="w-4 h-4" />

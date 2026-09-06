@@ -17,7 +17,23 @@ class StudentService {
 
   getStudentByCode(code) {
     if (!code) return null;
-    return db.prepare('SELECT * FROM students WHERE UPPER(student_code) = UPPER(?)').get(code.trim());
+    const cleanCode = code.trim();
+    // 1. Kiểm tra bảng danh sách học sinh
+    const st = db.prepare('SELECT * FROM students WHERE UPPER(student_code) = UPPER(?)').get(cleanCode);
+    if (st) return st;
+
+    // 2. Kiểm tra nếu học sinh từng làm bài trong các ca trước
+    const attempt = db.prepare('SELECT student_code, student_name, class_name FROM student_attempts WHERE UPPER(student_code) = UPPER(?) ORDER BY start_time DESC LIMIT 1').get(cleanCode);
+    if (attempt) {
+      return {
+        id: 'attempt_' + cleanCode,
+        student_code: attempt.student_code,
+        student_name: attempt.student_name,
+        class_name: attempt.class_name
+      };
+    }
+
+    return null;
   }
 
   createStudent({ student_code, student_name, class_name, gender = '' }) {
