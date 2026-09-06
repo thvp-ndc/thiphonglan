@@ -1,403 +1,391 @@
 /**
  * wmfUtils.js
  * Module xử lý định dạng tệp MathType và Windows Metafile (WMF / EMF):
- * 1. Giải mã MathType Equation Format (MTEF v3, v5) sang chuẩn KaTeX LaTeX ($...$).
- * 2. Trích xuất MTEF từ tệp nhị phân OLE Object (oleObject*.bin) và WMF Comment records.
- * 3. Chuyển đổi tệp ảnh WMF vector/bitmap sang SVG/PNG để trình duyệt Web hiển thị 100% không lỗi.
+ * 1. Giải mã MathType Equation Format (MTEF v3, v5) từ luồng nhị phân OLE (oleObject*.bin) sang KaTeX LaTeX ($...$).
+ * 2. Trích xuất MTEF từ Windows Metafile (WMF comment records 0x1B).
+ * 3. Chuyển đổi tệp ảnh WMF vector/bitmap (đồ thị, hình vẽ hình học) sang định dạng hiển thị web chính xác.
  */
 
 const fs = require('node:fs');
 const path = require('node:path');
 
-const GREEK_SYMBOL_MAP = {
-  0x61: ' \\alpha ',
-  0x62: ' \\beta ',
-  0x63: ' \\chi ',
-  0x64: ' \\delta ',
-  0x65: ' \\epsilon ',
-  0x66: ' \\phi ',
-  0x67: ' \\gamma ',
-  0x68: ' \\eta ',
-  0x69: ' \\iota ',
-  0x6A: ' \\varphi ',
-  0x6B: ' \\kappa ',
-  0x6C: ' \\lambda ',
-  0x6D: ' \\mu ',
-  0x6E: ' \\nu ',
-  0x70: ' \\pi ',
-  0x71: ' \\theta ',
-  0x72: ' \\rho ',
-  0x73: ' \\sigma ',
-  0x74: ' \\tau ',
-  0x75: ' \\upsilon ',
-  0x76: ' \\varpi ',
-  0x77: ' \\omega ',
-  0x78: ' \\xi ',
-  0x79: ' \\psi ',
-  0x7A: ' \\zeta ',
-  0x41: ' \\Alpha ',
-  0x42: ' \\Beta ',
-  0x44: ' \\Delta ',
-  0x46: ' \\Phi ',
-  0x47: ' \\Gamma ',
-  0x4C: ' \\Lambda ',
-  0x50: ' \\Pi ',
-  0x51: ' \\Theta ',
-  0x53: ' \\Sigma ',
-  0x57: ' \\Omega ',
-  0x58: ' \\Xi ',
-  0x59: ' \\Psi ',
-  0xA3: ' \\le ',
-  0xB3: ' \\ge ',
-  0xB9: ' \\ne ',
-  0xB1: ' \\pm ',
-  0xB4: ' \\times ',
-  0xB8: ' \\div ',
-  0xBD: ' \\Leftrightarrow ',
-  0xDC: ' \\Rightarrow ',
-  0xD8: ' \\to ',
-  0xC0: ' \\aleph ',
-  0xC6: ' \\emptyset ',
-  0xC7: ' \\cap ',
-  0xC8: ' \\cup ',
-  0xC9: ' \\supset ',
-  0xCA: ' \\supseteq ',
-  0xCB: ' \\not\\subset ',
-  0xCC: ' \\subset ',
-  0xCD: ' \\subseteq ',
-  0xCE: ' \\in ',
-  0xCF: ' \\notin ',
-  0xD0: ' \\angle ',
-  0xD1: ' \\nabla ',
-  0xD5: ' \\prod ',
-  0xD6: ' \\sqrt ',
-  0xD7: ' \\cdot ',
-  0xD9: ' \\wedge ',
-  0xDA: ' \\vee ',
-  0xE5: ' \\sum ',
-  0xF2: ' \\int ',
-  0xA5: ' \\infty '
+const GREEK_MAP = {
+  0x03B1: '\\alpha', 0x03B2: '\\beta', 0x03B3: '\\gamma', 0x03B4: '\\delta', 0x03B5: '\\epsilon',
+  0x03B6: '\\zeta', 0x03B7: '\\eta', 0x03B8: '\\theta', 0x03B9: '\\iota', 0x03BA: '\\kappa',
+  0x03BB: '\\lambda', 0x03BC: '\\mu', 0x03BD: '\\nu', 0x03BE: '\\xi', 0x03C0: '\\pi',
+  0x03C1: '\\rho', 0x03C3: '\\sigma', 0x03C4: '\\tau', 0x03C5: '\\upsilon', 0x03C6: '\\phi',
+  0x03C7: '\\chi', 0x03C8: '\\psi', 0x03C9: '\\omega', 0x03D5: '\\varphi', 0x03D6: '\\varpi',
+  0x0391: 'A', 0x0392: 'B', 0x0393: '\\Gamma', 0x0394: '\\Delta', 0x0395: 'E',
+  0x0396: 'Z', 0x0397: 'H', 0x0398: '\\Theta', 0x0399: 'I', 0x039A: 'K',
+  0x039B: '\\Lambda', 0x039C: 'M', 0x039D: 'N', 0x039E: '\\Xi', 0x03A0: '\\Pi',
+  0x03A1: 'P', 0x03A3: '\\Sigma', 0x03A4: 'T', 0x03A5: '\\Upsilon', 0x03A6: '\\Phi',
+  0x03A7: 'X', 0x03A8: '\\Psi', 0x03A9: '\\Omega'
 };
 
-class MtefParser {
-  constructor(buffer, startOffset = 0) {
-    this.buffer = buffer;
-    this.offset = startOffset;
-    this.fonts = [];
-    this.version = 5;
-  }
+const SYMBOL_FALLBACK_MAP = {
+  0x61: '\\alpha', 0x62: '\\beta', 0x63: '\\chi', 0x64: '\\delta', 0x65: '\\epsilon',
+  0x66: '\\phi', 0x67: '\\gamma', 0x68: '\\eta', 0x69: '\\iota', 0x6A: '\\varphi',
+  0x6B: '\\kappa', 0x6C: '\\lambda', 0x6D: '\\mu', 0x6E: '\\nu', 0x70: '\\pi',
+  0x71: '\\theta', 0x72: '\\rho', 0x73: '\\sigma', 0x74: '\\tau', 0x75: '\\upsilon',
+  0x76: '\\varpi', 0x77: '\\omega', 0x78: '\\xi', 0x79: '\\psi', 0x7A: '\\zeta',
+  0x41: 'A', 0x42: 'B', 0x43: 'X', 0x44: '\\Delta', 0x45: 'E', 0x46: '\\Phi',
+  0x47: '\\Gamma', 0x48: 'H', 0x49: 'I', 0x4B: 'K', 0x4C: '\\Lambda', 0x4D: 'M',
+  0x4E: 'N', 0x50: '\\Pi', 0x51: '\\Theta', 0x52: 'P', 0x53: '\\Sigma', 0x54: 'T',
+  0x55: '\\Upsilon', 0x57: '\\Omega', 0x58: '\\Xi', 0x59: '\\Psi', 0x5A: 'Z',
+  0xA3: ' \\le ', 0xB3: ' \\ge ', 0xB9: ' \\ne ', 0xB1: ' \\pm ', 0xB4: ' \\times ',
+  0xB8: ' \\div ', 0xBD: ' \\Leftrightarrow ', 0xDC: ' \\Rightarrow ', 0xD8: ' \\to ',
+  0xC0: ' \\aleph ', 0xC6: ' \\emptyset ', 0xC7: ' \\cap ', 0xC8: ' \\cup ',
+  0xC9: ' \\supset ', 0xCA: ' \\supseteq ', 0xCB: ' \\not\\subset ', 0xCC: ' \\subset ',
+  0xCD: ' \\subseteq ', 0xCE: ' \\in ', 0xCF: ' \\notin ', 0xD0: ' \\angle ',
+  0xD1: ' \\nabla ', 0xD5: ' \\prod ', 0xD6: ' \\sqrt{} ', 0xD7: ' \\cdot ',
+  0xD9: ' \\wedge ', 0xDA: ' \\vee ', 0xE5: ' \\sum ', 0xF2: ' \\int ', 0xA5: '\\infty',
+  0x2D: ' - '
+};
 
-  parse() {
-    try {
-      if (!this.buffer || this.buffer.length < this.offset + 5) return null;
+/**
+ * Trích xuất luồng nhị phân từ Microsoft Compound File Binary Format (CFBF / OLE2)
+ */
+function extractOleStream(buffer, targetName) {
+  if (!buffer || buffer.length < 512 || buffer.readUInt32LE(0) !== 0xe011cfd0) return null;
 
-      const mtefVer = this.buffer[this.offset++];
-      if (mtefVer !== 0x1B) return null;
+  try {
+    const sectorShift = buffer.readUInt16LE(30);
+    const sectorSize = 1 << sectorShift;
+    const miniSectorShift = buffer.readUInt16LE(32);
+    const miniSectorSize = 1 << miniSectorShift;
+    const numFatSectors = buffer.readUInt32LE(44);
+    const firstDirSector = buffer.readUInt32LE(48);
+    const miniStreamCutoff = buffer.readUInt32LE(56);
+    const firstMiniFatSector = buffer.readUInt32LE(60);
 
-      this.version = this.buffer[this.offset++]; // 3, 5
-      const platform = this.buffer[this.offset++];
-      const product = this.buffer[this.offset++];
-      const prodVer = this.buffer[this.offset++];
-
-      const latex = this.parseSlotLine();
-      return latex ? latex.trim() : null;
-    } catch (err) {
-      return null;
+    const fat = [];
+    for (let i = 0; i < 109 && i < numFatSectors; i++) {
+      const secNum = buffer.readUInt32LE(76 + i * 4);
+      if (secNum >= 0xfffffffe) break;
+      const offset = (secNum + 1) * sectorSize;
+      for (let j = 0; j < sectorSize / 4; j++) fat.push(buffer.readUInt32LE(offset + j * 4));
     }
-  }
 
-  readByte() {
-    if (this.offset >= this.buffer.length) return 0;
-    return this.buffer[this.offset++];
-  }
-
-  readUInt16() {
-    if (this.offset + 1 >= this.buffer.length) return 0;
-    const val = this.buffer.readUInt16LE(this.offset);
-    this.offset += 2;
-    return val;
-  }
-
-  parseSlotLine() {
-    if (this.offset >= this.buffer.length) return '';
-    const peek = this.buffer[this.offset];
-    if (peek === 1) {
-      this.offset++; // consume LINE tag
+    const dirBufs = [];
+    let dirSec = firstDirSector;
+    while (dirSec < 0xfffffffe && dirSec < fat.length) {
+      const offset = (dirSec + 1) * sectorSize;
+      dirBufs.push(buffer.slice(offset, offset + sectorSize));
+      dirSec = fat[dirSec];
     }
-    return this.parseLine();
+    const dirBuffer = Buffer.concat(dirBufs);
+
+    const rootEntry = dirBuffer.slice(0, 128);
+    const rootStartSec = rootEntry.readUInt32LE(116);
+    const rootSize = rootEntry.readUInt32LE(120);
+    const miniStreamBufs = [];
+    let mSec = rootStartSec;
+    while (mSec < 0xfffffffe && mSec < fat.length && miniStreamBufs.length * sectorSize < rootSize) {
+      const offset = (mSec + 1) * sectorSize;
+      miniStreamBufs.push(buffer.slice(offset, offset + sectorSize));
+      mSec = fat[mSec];
+    }
+    const miniStreamBuffer = Buffer.concat(miniStreamBufs);
+
+    const miniFat = [];
+    let mfSec = firstMiniFatSector;
+    while (mfSec < 0xfffffffe && mfSec < fat.length) {
+      const offset = (mfSec + 1) * sectorSize;
+      for (let j = 0; j < sectorSize / 4; j++) miniFat.push(buffer.readUInt32LE(offset + j * 4));
+      mfSec = fat[mfSec];
+    }
+
+    for (let i = 0; i < dirBuffer.length; i += 128) {
+      const entry = dirBuffer.slice(i, i + 128);
+      const nameLen = entry.readUInt16LE(64);
+      if (nameLen <= 0) continue;
+      const name = entry.slice(0, nameLen - 2).toString('utf16le');
+      const startSec = entry.readUInt32LE(116);
+      const size = entry.readUInt32LE(120);
+
+      if (name.toLowerCase().includes(targetName.toLowerCase())) {
+        if (size < miniStreamCutoff && miniStreamBuffer.length > 0 && miniFat.length > 0) {
+          const outBufs = [];
+          let cur = startSec;
+          let read = 0;
+          while (cur < 0xfffffffe && cur < miniFat.length && read < size) {
+            const offset = cur * miniSectorSize;
+            const take = Math.min(miniSectorSize, size - read);
+            outBufs.push(miniStreamBuffer.slice(offset, offset + take));
+            read += take;
+            cur = miniFat[cur];
+          }
+          return Buffer.concat(outBufs);
+        } else {
+          const outBufs = [];
+          let cur = startSec;
+          let read = 0;
+          while (cur < 0xfffffffe && cur < fat.length && read < size) {
+            const offset = (cur + 1) * sectorSize;
+            const take = Math.min(sectorSize, size - read);
+            outBufs.push(buffer.slice(offset, offset + take));
+            read += take;
+            cur = fat[cur];
+          }
+          return Buffer.concat(outBufs);
+        }
+      }
+    }
+  } catch (err) {
+    // ignore parse error
   }
+  return null;
+}
 
-  parseLine() {
-    let result = '';
+/**
+ * Giải mã luồng MTEF v3, v4, v5 sang KaTeX LaTeX
+ */
+function parseMtefStreamToLatex(buffer) {
+  if (!buffer || buffer.length < 5) return null;
 
-    while (this.offset < this.buffer.length) {
-      const record = this.readByte();
-      if (record === 0) { // END of line / slot
+  try {
+    let offset = 0;
+    // 1. Kiểm tra header length nếu là OLE Equation Stream (thường là 28 byte)
+    if (buffer.length >= 4) {
+      const hLen = buffer.readUInt32LE(0);
+      if (hLen >= 4 && hLen <= 64 && buffer.length > hLen + 5) {
+        offset = hLen;
+      }
+    }
+
+    // 2. Tìm chữ ký MTEF (0x05 0x01, 0x03 0x01, 0x1B 0x05)
+    for (let i = offset; i < Math.min(offset + 64, buffer.length - 4); i++) {
+      if ((buffer[i] === 0x05 || buffer[i] === 0x03) && (buffer[i + 1] === 0x01 || buffer[i + 1] === 0x00)) {
+        offset = i;
+        break;
+      } else if (buffer[i] === 0x1B && (buffer[i + 1] === 0x05 || buffer[i + 1] === 0x03)) {
+        offset = i + 1;
         break;
       }
+    }
 
-      const tag = record & 0x0F;
-      const opt = (record >> 4) & 0x0F;
+    // 3. Tìm vị trí bản ghi LINE gốc (0x0A 0x01 hoặc 0x01 0x00)
+    let rootLineOffset = -1;
+    for (let i = offset; i < buffer.length - 2; i++) {
+      if (buffer[i] === 0x0A && buffer[i + 1] === 0x01 && (buffer[i + 2] === 0x00 || buffer[i + 2] === 0x01 || buffer[i + 2] === 0x02)) {
+        rootLineOffset = i + 2;
+        if (buffer[rootLineOffset] === 0x00) rootLineOffset++;
+        break;
+      } else if (buffer[i] === 0x01 && buffer[i + 1] === 0x00 && buffer[i + 2] === 0x02 && i > offset + 10) {
+        rootLineOffset = i + 2;
+        break;
+      }
+    }
 
-      switch (tag) {
-        case 1: { // LINE (nested)
-          const lineStr = this.parseLine();
-          result += lineStr;
-          break;
+    if (rootLineOffset === -1) {
+      rootLineOffset = offset + 5;
+    }
+    offset = rootLineOffset;
+
+    function readByte() { return offset < buffer.length ? buffer[offset++] : 0; }
+    function readUInt16() {
+      if (offset + 1 >= buffer.length) return 0;
+      const v = buffer.readUInt16LE(offset);
+      offset += 2;
+      return v;
+    }
+
+    function parseSlot() {
+      if (offset >= buffer.length) return '';
+      if (buffer[offset] >= 0x10 && offset + 1 < buffer.length && (buffer[offset + 1] === 0x00 || buffer[offset + 1] === 0x01 || buffer[offset + 1] === 0x0A)) {
+        offset++;
+      }
+      while (offset < buffer.length && buffer[offset] === 0x00 && offset + 1 < buffer.length && buffer[offset + 1] === 0x00) {
+        offset++;
+      }
+      if (buffer[offset] === 0x00 && offset + 1 < buffer.length && (buffer[offset + 1] === 0x02 || buffer[offset + 1] === 0x03 || buffer[offset + 1] === 0x01 || buffer[offset + 1] === 0x0A)) {
+        offset++;
+      }
+      const peek = buffer[offset];
+      if (peek === 1 || peek === 0x0A) {
+        offset++;
+        while (offset < buffer.length && buffer[offset] === 0x00 && offset + 1 < buffer.length && (buffer[offset + 1] === 0x01 || buffer[offset + 1] === 0x0A || buffer[offset + 1] === 0x02 || buffer[offset + 1] === 0x03)) {
+          offset++;
         }
+      }
+      return parseStream();
+    }
 
-        case 2: { // CHAR
-          let charCode = 0;
-          if (this.version >= 5) {
-            charCode = this.readUInt16();
-          } else {
-            charCode = this.readByte();
-          }
+    function parseChar() {
+      const fPos = readByte();
+      const style = readByte();
+      const code = readUInt16();
+      let fallback = 0;
+      if (fPos === 4 || ((style & 0x04) !== 0 && fPos !== 0 && fPos !== 2)) {
+        fallback = readByte();
+      }
 
-          let fontIdx = -1;
-          if (opt & 0x01) { // Typeface present
-            fontIdx = this.readByte();
-          }
+      if (code === 0x2212 || fallback === 0x2D) return ' - ';
+      if (GREEK_MAP[code]) return GREEK_MAP[code];
+      if (SYMBOL_FALLBACK_MAP[fallback]) return SYMBOL_FALLBACK_MAP[fallback];
+      if (code === 0x221E || code === 0x00A5 || fallback === 0xA5) return '\\infty';
+      if (code === 0x2264 || fallback === 0xA3) return ' \\le ';
+      if (code === 0x2265 || fallback === 0xB3) return ' \\ge ';
+      if (code === 0x2260 || fallback === 0xB9) return ' \\ne ';
+      if (code === 0x00B1 || fallback === 0xB1) return ' \\pm ';
+      if (code === 0x00D7 || fallback === 0xB4) return ' \\times ';
+      if (code === 0x2208 || fallback === 0xCE) return ' \\in ';
+      if (code >= 0x20 && code <= 0x7E) return String.fromCharCode(code);
+      return '';
+    }
 
-          const mapped = this.mapCharToLatex(charCode, fontIdx);
-          result += mapped;
-          break;
-        }
+    function parseStream() {
+      let out = '';
+      while (offset < buffer.length) {
+        const b = readByte();
+        if (b === 0) break;
 
-        case 3: { // TMPL (Templates: Fraction, Radical, Integral, Cases, etc.)
-          const tmplSelector = this.readByte();
-          const tmplVariation = this.readByte();
-          const tmplLatex = this.parseTemplate(tmplSelector, tmplVariation);
-          result += tmplLatex;
-          break;
-        }
+        const tag = b & 0x0F;
+        const opt = (b >> 4) & 0x0F;
 
-        case 4: { // PILE (Multiple lines e.g. system of equations)
-          const pileLines = [];
-          while (this.offset < this.buffer.length) {
-            const peek = this.buffer[this.offset];
-            if (peek === 0) {
-              this.offset++;
-              break;
+        if (tag === 1 || tag === 0x0A) {
+          if (buffer[offset] === 0x00) offset++;
+          out += parseStream();
+        } else if (tag === 2) { // CHAR
+          out += parseChar();
+        } else if (tag === 3) { // TMPL
+          const sel = readByte();
+          const varId = readByte();
+
+          if (sel === 1 || (sel === 0 && varId === 11)) { // Fraction
+            const num = parseSlot();
+            const den = parseSlot();
+            out += `\\frac{${num}}{${den}}`;
+          } else if (sel === 2 || (sel === 0 && varId === 12)) { // Square root
+            const rad = parseSlot();
+            out += `\\sqrt{${rad}}`;
+          } else if (sel === 0 || sel === 10) { // Parenthesis / Fence
+            let inner = parseSlot();
+            inner = inner.replace(/\(\s*\)/g, '').trim();
+            if (inner.startsWith('(') && inner.endsWith(')')) {
+              out += inner;
+            } else {
+              out += `(${inner})`;
             }
-            pileLines.push(this.parseSlotLine());
+          } else if (sel === 8) { // Bracket [ ... ]
+            let inner = parseSlot();
+            inner = inner.replace(/\[\s*\]/g, '').trim();
+            if (inner.startsWith('[') && inner.endsWith(']')) {
+              out += inner;
+            } else {
+              out += `[${inner}]`;
+            }
+          } else if (sel === 9) { // Cases / Brace { ... }
+            let inner = parseSlot();
+            out += `\\{${inner}\\}`;
+          } else if (sel === 11) { // Bar | ... |
+            let inner = parseSlot();
+            out += `|${inner}|`;
+          } else if (sel === 12) { // Sub / Sup
+            const sub = (varId & 0x01) ? parseSlot() : '';
+            const sup = (varId & 0x02) ? parseSlot() : '';
+            if (sub) out += `_{${sub}}`;
+            if (sup) out += `^{${sup}}`;
+          } else {
+            out += parseSlot();
           }
-          if (pileLines.length > 1) {
-            result += `\\begin{cases} ${pileLines.join(' \\\\ ')} \\end{cases}`;
-          } else if (pileLines.length === 1) {
-            result += pileLines[0];
+        } else if (tag === 4) { // PILE
+          const lines = [];
+          while (offset < buffer.length) {
+            if (buffer[offset] === 0) { offset++; break; }
+            lines.push(parseSlot());
           }
-          break;
+          out += lines.length > 1 ? `\\begin{cases} ${lines.join(' \\\\ ')} \\end{cases}` : (lines[0] || '');
+        } else if (tag === 5) { // MATRIX
+          const rows = readByte() || 2;
+          const cols = readByte() || 2;
+          const rowList = [];
+          for (let r = 0; r < rows; r++) {
+            const cells = [];
+            for (let c = 0; c < cols; c++) cells.push(parseSlot());
+            rowList.push(cells.join(' & '));
+          }
+          out += `\\begin{pmatrix} ${rowList.join(' \\\\ ')} \\end{pmatrix}`;
+        } else if (tag === 6) {
+          readByte();
         }
-
-        case 5: { // MATRIX
-          const matrixLatex = this.parseMatrix();
-          result += matrixLatex;
-          break;
-        }
-
-        case 6: { // EMBELL (Embellishment e.g. primes ', '', dot, vector arrow)
-          const embellType = this.readByte();
-          if (embellType === 1) result += "'";
-          else if (embellType === 2) result += "''";
-          else if (embellType === 3) result += "'''";
-          else if (embellType === 4) result = `\\dot{${result}}`;
-          else if (embellType === 5) result = `\\ddot{${result}}`;
-          else if (embellType === 6) result = `\\vec{${result}}`;
-          else if (embellType === 7) result = `\\bar{${result}}`;
-          else if (embellType === 8) result = `\\tilde{${result}}`;
-          else if (embellType === 9) result = `\\hat{${result}}`;
-          break;
-        }
-
-        case 7: { // FONT DEF
-          const fontDefLen = this.readByte();
-          this.offset += fontDefLen;
-          break;
-        }
-
-        default:
-          break;
       }
+      return out;
     }
 
-    return result;
-  }
+    let latex = parseStream();
+    if (!latex) return null;
 
-  mapCharToLatex(code, fontIdx) {
-    if (fontIdx === 3 || fontIdx === 4 || (code >= 0x0391 && code <= 0x03C9)) {
-      if (GREEK_SYMBOL_MAP[code]) return GREEK_SYMBOL_MAP[code];
-    }
+    // Chuẩn hóa và làm sạch cấu trúc toán học
+    latex = latex.replace(/\(\s*\)/g, '');
+    latex = latex.replace(/\[\s*\]/g, '');
+    latex = latex.replace(/\(\(([^()]+)\)\)/g, '($1)');
+    latex = latex.replace(/\[\[([^\[\]]+)\]\]/g, '[$1]');
 
-    if (code >= 32 && code <= 126) {
-      const ch = String.fromCharCode(code);
-      if (ch === '{') return '\\{';
-      if (ch === '}') return '\\}';
-      return ch;
-    }
+    // Chuẩn hóa ngoặc đôi trong tọa độ e.g. ((- \frac{1}{2}); 9) -> (-\frac{1}{2}; 9)
+    latex = latex.replace(/\(\(([^()]+)\)\s*;\s*([^()]+)\)/g, '($1; $2)');
+    latex = latex.replace(/\(([^()]+)\s*;\s*\(([^()]+)\)\)/g, '($1; $2)');
 
-    if (GREEK_SYMBOL_MAP[code]) {
-      return GREEK_SYMBOL_MAP[code];
-    }
+    // Chuẩn hóa ngoặc nửa khoảng e.g. (a; b)(] -> (a; b] hoặc (a; b)[) -> [a; b)
+    latex = latex.replace(/\(([^()\[\]]+)\)\s*\(\s*\]/g, '($1]');
+    latex = latex.replace(/\(([^()\[\]]+)\)\s*\[\s*\)/g, '[$1)');
+    latex = latex.replace(/\(([^()\[\]]+)\)\s*\[\s*\]/g, '[$1]');
+    latex = latex.replace(/\(([^()\[\]]+)\s*\(\s*\]/g, '($1]');
+    latex = latex.replace(/\(([^()\[\]]+)\s*\[\s*\)/g, '[$1)');
+    latex = latex.replace(/\(([^()\[\]]+)\s*\[\s*\]/g, '[$1]');
 
-    if (code >= 0x0391 && code <= 0x03C9) {
-      return String.fromCharCode(code);
-    }
+    // Tự động chuẩn hóa hàm lượng giác và toán học sang lệnh LaTeX KaTeX
+    latex = latex.replace(/\b(sin|cos|tan|cot|arcsin|arccos|arctan|ln|log|lim|max|min|det)\b/g, '\\$1');
 
-    return '';
-  }
-
-  parseTemplate(selector, variation) {
-    switch (selector) {
-      case 0: { // tmROOT (Radical)
-        const radicand = this.parseSlotLine();
-        const degree = (variation & 0x01) ? this.parseSlotLine() : '';
-        if (degree) {
-          return `\\sqrt[${degree}]{${radicand}}`;
-        }
-        return `\\sqrt{${radicand}}`;
-      }
-
-      case 1: { // tmFRACT (Fraction)
-        const num = this.parseSlotLine();
-        const den = this.parseSlotLine();
-        if (variation === 1) {
-          return `${num}/${den}`;
-        }
-        return `\\frac{${num}}{${den}}`;
-      }
-
-      case 2: { // tmUBAR / tmOBAR
-        const content = this.parseSlotLine();
-        return variation === 1 ? `\\underline{${content}}` : `\\overline{${content}}`;
-      }
-
-      case 3: { // tmARROW
-        const content = this.parseSlotLine();
-        return `\\vec{${content}}`;
-      }
-
-      case 4: { // tmINTEG (Integral)
-        const lower = this.parseSlotLine();
-        const upper = this.parseSlotLine();
-        const integrand = this.parseSlotLine();
-        let res = '\\int';
-        if (lower) res += `_{${lower}}`;
-        if (upper) res += `^{${upper}}`;
-        if (integrand) res += ` ${integrand}`;
-        return res;
-      }
-
-      case 5: { // tmSUM
-        const lower = this.parseSlotLine();
-        const upper = this.parseSlotLine();
-        const operand = this.parseSlotLine();
-        let res = '\\sum';
-        if (lower) res += `_{${lower}}`;
-        if (upper) res += `^{${upper}}`;
-        if (operand) res += ` ${operand}`;
-        return res;
-      }
-
-      case 6: { // tmPROD
-        const lower = this.parseSlotLine();
-        const upper = this.parseSlotLine();
-        const operand = this.parseSlotLine();
-        let res = '\\prod';
-        if (lower) res += `_{${lower}}`;
-        if (upper) res += `^{${upper}}`;
-        if (operand) res += ` ${operand}`;
-        return res;
-      }
-
-      case 8:
-      case 10: { // tmBRACK / tmPAREN
-        const content = this.parseSlotLine();
-        if (selector === 8) return `\\left[ ${content} \\right]`;
-        return `\\left( ${content} \\right)`;
-      }
-
-      case 9: { // tmBRACE (Cases)
-        const content = this.parseSlotLine();
-        return `\\begin{cases} ${content} \\end{cases}`;
-      }
-
-      case 11: { // tmBAR (Absolute value)
-        const content = this.parseSlotLine();
-        return `\\left| ${content} \\right|`;
-      }
-
-      case 12: { // tmSUB, tmSUP, tmSUBSUP
-        const sub = (variation & 0x01) ? this.parseSlotLine() : '';
-        const sup = (variation & 0x02) ? this.parseSlotLine() : '';
-        let res = '';
-        if (sub) res += `_{${sub}}`;
-        if (sup) res += `^{${sup}}`;
-        return res;
-      }
-
-      case 13: { // tmBOX
-        const content = this.parseSlotLine();
-        return `\\boxed{${content}}`;
-      }
-
-      default: {
-        return this.parseSlotLine();
-      }
-    }
-  }
-
-  parseMatrix() {
-    const rows = this.readByte() || 2;
-    const cols = this.readByte() || 2;
-    const rowList = [];
-
-    for (let r = 0; r < rows; r++) {
-      const cellList = [];
-      for (let c = 0; c < cols; c++) {
-        cellList.push(this.parseSlotLine());
-      }
-      rowList.push(cellList.join(' & '));
-    }
-
-    return `\\begin{pmatrix} ${rowList.join(' \\\\ ')} \\end{pmatrix}`;
+    latex = latex.replace(/\s+/g, ' ').replace(/\s+([.,;:])/g, '$1');
+    return latex.trim();
+  } catch (e) {
+    return null;
   }
 }
 
+/**
+ * Trích xuất công thức MathType từ Buffer tệp (.bin, .wmf, .emf) sang dạng KaTeX LaTeX ($...$)
+ */
 function extractMathTypeToLatex(buffer) {
   if (!buffer || buffer.length < 10) return null;
 
-  for (let i = 0; i < buffer.length - 8; i++) {
-    if (buffer[i] === 0x1B && (buffer[i + 1] === 0x03 || buffer[i + 1] === 0x05 || buffer[i + 1] === 0x01)) {
-      const parser = new MtefParser(buffer, i);
-      const latex = parser.parse();
-      if (latex && latex.trim().length > 0) {
-        return `$${latex.trim()}$`;
+  try {
+    // 1. Kiểm tra đối tượng nhúng OLE CFBF (oleObject*.bin)
+    if (buffer.length >= 512 && buffer.readUInt32LE(0) === 0xe011cfd0) {
+      const stream = extractOleStream(buffer, 'Equation Native');
+      if (stream) {
+        const latex = parseMtefStreamToLatex(stream);
+        if (latex && latex.length > 0) return `$${latex}$`;
       }
     }
-  }
 
-  const str = buffer.toString('binary');
-  const mtIdx = str.indexOf('MathType');
-  if (mtIdx !== -1) {
-    for (let i = mtIdx; i < Math.min(mtIdx + 300, buffer.length - 8); i++) {
+    // 2. Kiểm tra luồng MTEF trực tiếp
+    const rawLatex = parseMtefStreamToLatex(buffer);
+    if (rawLatex && rawLatex.length > 0) return `$${rawLatex}$`;
+
+    // 3. Kiểm tra tệp WMF chứa MathType comment records
+    for (let i = 0; i < buffer.length - 8; i++) {
       if (buffer[i] === 0x1B && (buffer[i + 1] === 0x03 || buffer[i + 1] === 0x05 || buffer[i + 1] === 0x01)) {
-        const parser = new MtefParser(buffer, i);
-        const latex = parser.parse();
-        if (latex && latex.trim().length > 0) {
-          return `$${latex.trim()}$`;
-        }
+        const latex = parseMtefStreamToLatex(buffer.slice(i));
+        if (latex && latex.length > 0) return `$${latex}$`;
       }
     }
+  } catch (err) {
+    // ignore
   }
 
   return null;
 }
 
+/**
+ * Chuyển đổi tệp ảnh WMF vector / bitmap (đồ thị, hình vẽ) sang PNG/BMP/SVG để trình duyệt web hiển thị
+ */
 function convertWmfToWebImage(wmfBuffer) {
   if (!wmfBuffer || wmfBuffer.length < 40) return null;
 
   try {
+    // 1. Kiểm tra nếu WMF chứa bitmap DIB nhúng (0x28 0x00 0x00 0x00 = BITMAPINFOHEADER)
     for (let i = 0; i < wmfBuffer.length - 40; i++) {
       if (wmfBuffer[i] === 0x28 && wmfBuffer[i + 1] === 0x00 && wmfBuffer[i + 2] === 0x00 && wmfBuffer[i + 3] === 0x00) {
         const biWidth = wmfBuffer.readInt32LE(i + 4);
@@ -426,6 +414,7 @@ function convertWmfToWebImage(wmfBuffer) {
       }
     }
 
+    // 2. Vector WMF: Xác định kích thước từ Placeable Header (0x9AC6CDD7)
     let width = 400;
     let height = 250;
     if (wmfBuffer.readUInt32LE(0) === 0x9AC6CDD7) {
@@ -458,6 +447,8 @@ function convertWmfToWebImage(wmfBuffer) {
 
 module.exports = {
   extractMathTypeToLatex,
-  convertWmfToWebImage,
-  MtefParser
+  parseMtefStreamToLatex,
+  extractOleStream,
+  convertWmfToWebImage
 };
+
