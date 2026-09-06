@@ -441,54 +441,64 @@ export default function ExamManager({ onSelectSessionForMonitor, onSelectSession
       setImportingWord(true);
       const reader = new FileReader();
       reader.onload = async (event) => {
-        const base64 = event.target.result;
-        const res = await fetch('/api/exams/import-word', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fileBase64: base64 })
-        });
-        const data = await res.json();
-        if (data.success) {
-          const importedQuestions = data.questions || [];
-          let shouldReplace = true;
-          if (isInsideModal && examForm.questions.length > 0) {
-            shouldReplace = confirm(
-              `Đã nhận diện thành công ${importedQuestions.length} câu hỏi từ file "${file.name}".\n\n` +
-              `• Bấm OK để GHI ĐÈ toàn bộ câu hỏi hiện tại trong đề.\n` +
-              `• Bấm Cancel để THÊM NỐI TIẾP vào danh sách câu hỏi đang có.`
-            );
-          }
+        try {
+          const base64 = event.target.result;
+          const res = await fetch('/api/exams/import-word', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fileBase64: base64 })
+          });
+          const data = await res.json();
+          if (data.success) {
+            const importedQuestions = data.questions || [];
+            let shouldReplace = true;
+            if (isInsideModal && examForm.questions.length > 0) {
+              shouldReplace = confirm(
+                `Đã nhận diện thành công ${importedQuestions.length} câu hỏi từ file "${file.name}".\n\n` +
+                `• Bấm OK để GHI ĐÈ toàn bộ câu hỏi hiện tại trong đề.\n` +
+                `• Bấm Cancel để THÊM NỐI TIẾP vào danh sách câu hỏi đang có.`
+              );
+            }
 
-          let finalQuestions = importedQuestions;
-          if (!shouldReplace) {
-            const startOrder = examForm.questions.length + 1;
-            const renumbered = importedQuestions.map((q, idx) => ({
-              ...q,
-              order_index: startOrder + idx
+            let finalQuestions = importedQuestions;
+            if (!shouldReplace) {
+              const startOrder = examForm.questions.length + 1;
+              const renumbered = importedQuestions.map((q, idx) => ({
+                ...q,
+                order_index: startOrder + idx
+              }));
+              finalQuestions = [...examForm.questions, ...renumbered];
+            }
+
+            const computedTotal = Math.round(finalQuestions.reduce((sum, q) => sum + (parseFloat(q.max_score) || 0), 0) * 100) / 100;
+            setExamForm(prev => ({
+              ...prev,
+              title: (!isInsideModal || !prev.title) ? (data.title || file.name.replace(/\.[^/.]+$/, '')) : prev.title,
+              total_score: computedTotal > 0 ? computedTotal : 10.0,
+              questions: finalQuestions
             }));
-            finalQuestions = [...examForm.questions, ...renumbered];
+            setShowExamModal(true);
+            alert(`Đã nhận diện thành công ${importedQuestions.length} câu hỏi từ file Word! Tổng số câu hiện tại: ${finalQuestions.length}. Tổng điểm: ${computedTotal > 0 ? computedTotal : 10.0}đ.`);
+          } else {
+            alert('Lỗi phân tích file Word: ' + (data.message || 'Không rõ nguyên nhân'));
           }
-
-          const computedTotal = Math.round(finalQuestions.reduce((sum, q) => sum + (parseFloat(q.max_score) || 0), 0) * 100) / 100;
-          setExamForm(prev => ({
-            ...prev,
-            title: (!isInsideModal || !prev.title) ? (data.title || file.name.replace(/\.[^/.]+$/, '')) : prev.title,
-            total_score: computedTotal > 0 ? computedTotal : 10.0,
-            questions: finalQuestions
-          }));
-          setShowExamModal(true);
-          alert(`Đã nhận diện thành công ${importedQuestions.length} câu hỏi từ file Word! Tổng số câu hiện tại: ${finalQuestions.length}. Tổng điểm: ${computedTotal > 0 ? computedTotal : 10.0}đ.`);
-        } else {
-          alert('Lỗi phân tích file Word: ' + data.message);
+        } catch (fetchErr) {
+          alert('Lỗi kết nối máy chủ khi xử lý file: ' + fetchErr.message);
+        } finally {
+          setImportingWord(false);
+          if (e.target) e.target.value = '';
         }
+      };
+      reader.onerror = () => {
+        alert('Lỗi đọc file từ máy tính');
         setImportingWord(false);
-        e.target.value = '';
+        if (e.target) e.target.value = '';
       };
       reader.readAsDataURL(file);
     } catch (err) {
       alert('Không thể đọc file Word: ' + err.message);
       setImportingWord(false);
-      e.target.value = '';
+      if (e.target) e.target.value = '';
     }
   };
 

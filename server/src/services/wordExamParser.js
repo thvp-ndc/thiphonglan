@@ -73,40 +73,49 @@ class WordExamParser {
           } else if (!zipPath.startsWith('word/')) {
             zipPath = 'word/' + zipPath.replace(/^\//, '');
           }
+          
+          try {
+            const fileInZip = zip.file(zipPath);
+            if (!fileInZip) continue;
 
-          const fileInZip = zip.file(zipPath);
-          if (!fileInZip) continue;
+            const fileBuffer = await fileInZip.async('nodebuffer');
+            let ext = path.extname(zipPath).toLowerCase().replace('.', '') || 'png';
+            const isMathCandidate = ext === 'bin' || ext === 'wmf' || ext === 'emf' || zipPath.includes('embeddings') || zipPath.includes('oleObject');
 
-          const fileBuffer = await fileInZip.async('nodebuffer');
-
-          // A. Kiểm tra nếu là tệp nhúng MathType OLE (.bin) hoặc WMF/EMF chứa công thức
-          const mathTypeLatex = extractMathTypeToLatex(fileBuffer);
-          if (mathTypeLatex) {
-            relMap[rId] = { isMath: true, latex: mathTypeLatex };
-            continue;
-          }
-
-          // B. Xử lý ảnh thông thường hoặc chuyển đổi WMF/EMF sang định dạng web
-          let ext = path.extname(zipPath).toLowerCase().replace('.', '') || 'png';
-          let finalBuffer = fileBuffer;
-
-          if (ext === 'wmf' || ext === 'emf') {
-            const converted = convertWmfToWebImage(fileBuffer);
-            if (converted) {
-              finalBuffer = converted.buffer;
-              ext = converted.ext;
+            // A. Kiểm tra nếu là tệp nhúng MathType OLE (.bin) hoặc WMF/EMF chứa công thức
+            let mathTypeLatex = null;
+            if (isMathCandidate) {
+              mathTypeLatex = extractMathTypeToLatex(fileBuffer);
             }
+
+            if (mathTypeLatex) {
+              relMap[rId] = { isMath: true, latex: mathTypeLatex };
+              continue;
+            }
+
+            // B. Xử lý ảnh thông thường hoặc chuyển đổi WMF/EMF sang định dạng web
+            let finalBuffer = fileBuffer;
+
+            if (ext === 'wmf' || ext === 'emf') {
+              const converted = convertWmfToWebImage(fileBuffer);
+              if (converted) {
+                finalBuffer = converted.buffer;
+                ext = converted.ext;
+              }
+            }
+
+            const fileName = `word_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.${ext}`;
+            const diskPath = path.join(uploadsDir, fileName);
+            fs.writeFileSync(diskPath, finalBuffer);
+
+            relMap[rId] = {
+              isMath: false,
+              url: `/uploads/images/${fileName}`,
+              fileName
+            };
+          } catch (itemErr) {
+            console.warn(`[WordExamParser] Lỗi xử lý relationship ${rId} (${zipPath}):`, itemErr.message);
           }
-
-          const fileName = `word_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.${ext}`;
-          const diskPath = path.join(uploadsDir, fileName);
-          fs.writeFileSync(diskPath, finalBuffer);
-
-          relMap[rId] = {
-            isMath: false,
-            url: `/uploads/images/${fileName}`,
-            fileName
-          };
         }
       } catch (e) {
         console.warn('[WordExamParser] Lỗi trích xuất quan hệ ảnh rels:', e.message);

@@ -68,7 +68,7 @@ function extractOleStream(buffer, targetName) {
 
     const dirBufs = [];
     let dirSec = firstDirSector;
-    while (dirSec < 0xfffffffe && dirSec < fat.length) {
+    while (dirSec < 0xfffffffe && dirSec < fat.length && dirBufs.length < 500) {
       const offset = (dirSec + 1) * sectorSize;
       dirBufs.push(buffer.slice(offset, offset + sectorSize));
       dirSec = fat[dirSec];
@@ -80,7 +80,7 @@ function extractOleStream(buffer, targetName) {
     const rootSize = rootEntry.readUInt32LE(120);
     const miniStreamBufs = [];
     let mSec = rootStartSec;
-    while (mSec < 0xfffffffe && mSec < fat.length && miniStreamBufs.length * sectorSize < rootSize) {
+    while (mSec < 0xfffffffe && mSec < fat.length && miniStreamBufs.length * sectorSize < rootSize && miniStreamBufs.length < 1000) {
       const offset = (mSec + 1) * sectorSize;
       miniStreamBufs.push(buffer.slice(offset, offset + sectorSize));
       mSec = fat[mSec];
@@ -89,7 +89,7 @@ function extractOleStream(buffer, targetName) {
 
     const miniFat = [];
     let mfSec = firstMiniFatSector;
-    while (mfSec < 0xfffffffe && mfSec < fat.length) {
+    while (mfSec < 0xfffffffe && mfSec < fat.length && miniFat.length < 5000) {
       const offset = (mfSec + 1) * sectorSize;
       for (let j = 0; j < sectorSize / 4; j++) miniFat.push(buffer.readUInt32LE(offset + j * 4));
       mfSec = fat[mfSec];
@@ -108,7 +108,7 @@ function extractOleStream(buffer, targetName) {
           const outBufs = [];
           let cur = startSec;
           let read = 0;
-          while (cur < 0xfffffffe && cur < miniFat.length && read < size) {
+          while (cur < 0xfffffffe && cur < miniFat.length && read < size && outBufs.length < 2000) {
             const offset = cur * miniSectorSize;
             const take = Math.min(miniSectorSize, size - read);
             outBufs.push(miniStreamBuffer.slice(offset, offset + take));
@@ -120,7 +120,7 @@ function extractOleStream(buffer, targetName) {
           const outBufs = [];
           let cur = startSec;
           let read = 0;
-          while (cur < 0xfffffffe && cur < fat.length && read < size) {
+          while (cur < 0xfffffffe && cur < fat.length && read < size && outBufs.length < 2000) {
             const offset = (cur + 1) * sectorSize;
             const take = Math.min(sectorSize, size - read);
             outBufs.push(buffer.slice(offset, offset + take));
@@ -154,24 +154,31 @@ function parseMtefStreamToLatex(buffer) {
     }
 
     // 2. Tìm chữ ký MTEF (0x05 0x01, 0x03 0x01, 0x1B 0x05)
-    for (let i = offset; i < Math.min(offset + 64, buffer.length - 4); i++) {
+    let foundSig = false;
+    for (let i = offset; i < Math.min(offset + 128, buffer.length - 4); i++) {
       if ((buffer[i] === 0x05 || buffer[i] === 0x03) && (buffer[i + 1] === 0x01 || buffer[i + 1] === 0x00)) {
         offset = i;
+        foundSig = true;
         break;
       } else if (buffer[i] === 0x1B && (buffer[i + 1] === 0x05 || buffer[i + 1] === 0x03)) {
         offset = i + 1;
+        foundSig = true;
         break;
       }
     }
 
+    if (!foundSig && offset === 0) {
+      return null;
+    }
+
     // 3. Tìm vị trí bản ghi LINE gốc (0x0A 0x01 hoặc 0x01 0x00)
     let rootLineOffset = -1;
-    for (let i = offset; i < buffer.length - 2; i++) {
+    for (let i = offset; i < Math.min(offset + 256, buffer.length - 2); i++) {
       if (buffer[i] === 0x0A && buffer[i + 1] === 0x01 && (buffer[i + 2] === 0x00 || buffer[i + 2] === 0x01 || buffer[i + 2] === 0x02)) {
         rootLineOffset = i + 2;
         if (buffer[rootLineOffset] === 0x00) rootLineOffset++;
         break;
-      } else if (buffer[i] === 0x01 && buffer[i + 1] === 0x00 && buffer[i + 2] === 0x02 && i > offset + 10) {
+      } else if (buffer[i] === 0x01 && buffer[i + 1] === 0x00 && buffer[i + 2] === 0x02 && i > offset + 5) {
         rootLineOffset = i + 2;
         break;
       }
@@ -182,6 +189,9 @@ function parseMtefStreamToLatex(buffer) {
     }
     offset = rootLineOffset;
 
+    let opCount = 0;
+    const MAX_OPS = 2500;
+
     function readByte() { return offset < buffer.length ? buffer[offset++] : 0; }
     function readUInt16() {
       if (offset + 1 >= buffer.length) return 0;
@@ -190,8 +200,8 @@ function parseMtefStreamToLatex(buffer) {
       return v;
     }
 
-    function parseSlot() {
-      if (offset >= buffer.length) return '';
+    function parseSlot(depth = 0) {
+      if (offset >= buffer.length || depth > 15 || ++opCount > MAX_OPS) return '';
       if (buffer[offset] >= 0x10 && offset + 1 < buffer.length && (buffer[offset + 1] === 0x00 || buffer[offset + 1] === 0x01 || buffer[offset + 1] === 0x0A)) {
         offset++;
       }
@@ -208,7 +218,7 @@ function parseMtefStreamToLatex(buffer) {
           offset++;
         }
       }
-      return parseStream();
+      return parseStream(depth + 1);
     }
 
     function parseChar() {
@@ -234,18 +244,18 @@ function parseMtefStreamToLatex(buffer) {
       return '';
     }
 
-    function parseStream() {
+    function parseStream(depth = 0) {
+      if (depth > 15 || ++opCount > MAX_OPS) return '';
       let out = '';
-      while (offset < buffer.length) {
+      while (offset < buffer.length && opCount < MAX_OPS) {
         const b = readByte();
         if (b === 0) break;
 
         const tag = b & 0x0F;
-        const opt = (b >> 4) & 0x0F;
 
         if (tag === 1 || tag === 0x0A) {
           if (buffer[offset] === 0x00) offset++;
-          out += parseStream();
+          out += parseStream(depth + 1);
         } else if (tag === 2) { // CHAR
           out += parseChar();
         } else if (tag === 3) { // TMPL
@@ -253,22 +263,22 @@ function parseMtefStreamToLatex(buffer) {
           const varId = readByte();
 
           if (sel === 1 || (sel === 0 && varId === 11)) { // Fraction
-            const num = parseSlot();
-            const den = parseSlot();
+            const num = parseSlot(depth + 1);
+            const den = parseSlot(depth + 1);
             out += `\\frac{${num}}{${den}}`;
           } else if (sel === 2 || (sel === 0 && varId === 12)) { // Square root
-            const rad = parseSlot();
+            const rad = parseSlot(depth + 1);
             out += `\\sqrt{${rad}}`;
           } else if (sel === 0 || sel === 10) { // Parenthesis / Fence
-            let inner = parseSlot();
-            inner = inner.replace(/\(\s*\)/g, '').trim();
+            let inner = parseSlot(depth + 1);
+            inner = inner.replace(/\\left\(|\\right\)/g, '').replace(/\(\s*\)/g, '').trim();
             if (inner.startsWith('(') && inner.endsWith(')')) {
               out += inner;
             } else {
               out += `(${inner})`;
             }
           } else if (sel === 8) { // Bracket [ ... ]
-            let inner = parseSlot();
+            let inner = parseSlot(depth + 1);
             inner = inner.replace(/\[\s*\]/g, '').trim();
             if (inner.startsWith('[') && inner.endsWith(']')) {
               out += inner;
@@ -276,33 +286,40 @@ function parseMtefStreamToLatex(buffer) {
               out += `[${inner}]`;
             }
           } else if (sel === 9) { // Cases / Brace { ... }
-            let inner = parseSlot();
+            let inner = parseSlot(depth + 1);
             out += `\\{${inner}\\}`;
           } else if (sel === 11) { // Bar | ... |
-            let inner = parseSlot();
+            let inner = parseSlot(depth + 1);
             out += `|${inner}|`;
           } else if (sel === 12) { // Sub / Sup
-            const sub = (varId & 0x01) ? parseSlot() : '';
-            const sup = (varId & 0x02) ? parseSlot() : '';
+            const sub = (varId & 0x01) ? parseSlot(depth + 1) : '';
+            const sup = (varId & 0x02) ? parseSlot(depth + 1) : '';
             if (sub) out += `_{${sub}}`;
             if (sup) out += `^{${sup}}`;
           } else {
-            out += parseSlot();
+            out += parseSlot(depth + 1);
           }
         } else if (tag === 4) { // PILE
           const lines = [];
-          while (offset < buffer.length) {
+          let pileSteps = 0;
+          while (offset < buffer.length && pileSteps++ < 20) {
             if (buffer[offset] === 0) { offset++; break; }
-            lines.push(parseSlot());
+            const prevOff = offset;
+            lines.push(parseSlot(depth + 1));
+            if (offset === prevOff) offset++;
           }
           out += lines.length > 1 ? `\\begin{cases} ${lines.join(' \\\\ ')} \\end{cases}` : (lines[0] || '');
         } else if (tag === 5) { // MATRIX
-          const rows = readByte() || 2;
-          const cols = readByte() || 2;
+          const rows = Math.min(readByte() || 2, 10);
+          const cols = Math.min(readByte() || 2, 10);
           const rowList = [];
           for (let r = 0; r < rows; r++) {
             const cells = [];
-            for (let c = 0; c < cols; c++) cells.push(parseSlot());
+            for (let c = 0; c < cols; c++) {
+              const prevOff = offset;
+              cells.push(parseSlot(depth + 1));
+              if (offset === prevOff) offset++;
+            }
             rowList.push(cells.join(' & '));
           }
           out += `\\begin{pmatrix} ${rowList.join(' \\\\ ')} \\end{pmatrix}`;
@@ -313,7 +330,7 @@ function parseMtefStreamToLatex(buffer) {
       return out;
     }
 
-    let latex = parseStream();
+    let latex = parseStream(0);
     if (!latex) return null;
 
     // Chuẩn hóa và làm sạch cấu trúc toán học
@@ -350,6 +367,17 @@ function parseMtefStreamToLatex(buffer) {
 function extractMathTypeToLatex(buffer) {
   if (!buffer || buffer.length < 10) return null;
 
+  // 0. Bỏ qua các định dạng ảnh raster thông thường (PNG, JPEG, GIF, WEBP, PDF, ZIP)
+  if (
+    (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) || // PNG
+    (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) || // JPEG
+    (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) || // GIF
+    (buffer[0] === 0x50 && buffer[1] === 0x4B && buffer[2] === 0x03 && buffer[3] === 0x04) || // PK zip
+    (buffer[0] === 0x25 && buffer[1] === 0x50 && buffer[2] === 0x44 && buffer[3] === 0x46)    // PDF
+  ) {
+    return null;
+  }
+
   try {
     // 1. Kiểm tra đối tượng nhúng OLE CFBF (oleObject*.bin)
     if (buffer.length >= 512 && buffer.readUInt32LE(0) === 0xe011cfd0) {
@@ -358,14 +386,22 @@ function extractMathTypeToLatex(buffer) {
         const latex = parseMtefStreamToLatex(stream);
         if (latex && latex.length > 0) return `$${latex}$`;
       }
+      return null;
     }
 
-    // 2. Kiểm tra luồng MTEF trực tiếp
-    const rawLatex = parseMtefStreamToLatex(buffer);
-    if (rawLatex && rawLatex.length > 0) return `$${rawLatex}$`;
+    // 2. Kiểm tra nếu luồng bắt đầu trực tiếp bằng chữ ký MTEF (0x05 0x01, 0x03 0x01)
+    if (
+      (buffer[0] === 0x05 && buffer[1] === 0x01) ||
+      (buffer[0] === 0x03 && buffer[1] === 0x01) ||
+      (buffer.length >= 28 && (buffer[28] === 0x05 || buffer[28] === 0x03) && buffer[29] === 0x01)
+    ) {
+      const rawLatex = parseMtefStreamToLatex(buffer);
+      if (rawLatex && rawLatex.length > 0) return `$${rawLatex}$`;
+    }
 
-    // 3. Kiểm tra tệp WMF chứa MathType comment records
-    for (let i = 0; i < buffer.length - 8; i++) {
+    // 3. Kiểm tra tệp WMF chứa MathType comment records (quét nhanh trong header 2048 byte đầu)
+    const scanLimit = Math.min(buffer.length - 8, 2048);
+    for (let i = 0; i < scanLimit; i++) {
       if (buffer[i] === 0x1B && (buffer[i + 1] === 0x03 || buffer[i + 1] === 0x05 || buffer[i + 1] === 0x01)) {
         const latex = parseMtefStreamToLatex(buffer.slice(i));
         if (latex && latex.length > 0) return `$${latex}$`;
