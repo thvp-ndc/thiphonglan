@@ -75,14 +75,11 @@ const MATH_SYMBOLS = {
   'Φ': ' \\Phi '
 };
 
-/**
- * Chuẩn hóa một biểu thức toán học hoặc chuỗi chứa Unicode toán học
- */
 function normalizeMathString(str) {
   if (!str) return '';
   let res = str;
 
-  // 1. Chuyển đổi số mũ Unicode (ví dụ: x², x³⁺¹, uⁿ, (a+b)²)
+  // 1. Chuyển đổi số mũ Unicode
   const supKeys = Object.keys(SUPERSCRIPTS).join('');
   const supRegex = new RegExp('([a-zA-Z0-9)\\x5D\\x7D])([' + supKeys + ']+)', 'g');
   res = res.replace(supRegex, (match, base, sups) => {
@@ -90,14 +87,13 @@ function normalizeMathString(str) {
     return base + '^{' + val + '}';
   });
 
-  // Số mũ đứng riêng lẻ (không có base trước đó hoặc đứng đầu cụm)
   const soloSupRegex = new RegExp('([' + supKeys + ']+)', 'g');
   res = res.replace(soloSupRegex, (match, sups) => {
     const val = (sups || '').split('').map(c => SUPERSCRIPTS[c] || c).join('');
     return '^{' + val + '}';
   });
 
-  // 2. Chuyển đổi chỉ số dưới Unicode (ví dụ: uₙ, x₁, aᵢ)
+  // 2. Chuyển đổi chỉ số dưới Unicode
   const subKeys = Object.keys(SUBSCRIPTS).join('');
   const subRegex = new RegExp('([a-zA-Z0-9)\\x5D\\x7D])([' + subKeys + ']+)', 'g');
   res = res.replace(subRegex, (match, base, subs) => {
@@ -111,7 +107,7 @@ function normalizeMathString(str) {
     return '_{' + val + '}';
   });
 
-  // 3. Căn bậc hai (ví dụ: √(x+1) -> \sqrt{x+1}, √2 -> \sqrt{2})
+  // 3. Căn bậc hai
   res = res.replace(/√\(([^)]+)\)/g, '\\sqrt{$1}');
   res = res.replace(/√([a-zA-Z0-9]+)/g, '\\sqrt{$1}');
 
@@ -125,20 +121,14 @@ function normalizeMathString(str) {
   return res;
 }
 
-/**
- * Tự động tìm và bao bọc công thức toán học chưa có $...$ hoặc có ký hiệu toán học
- * Không làm ảnh hưởng đến code block HTML/Python hoặc thẻ hình ảnh Markdown
- */
 function autoFormatMathInContent(text) {
   if (!text) return '';
 
-  // Tách biệt các đoạn code block \`\`\`...\`\`\`, inline code \`...\`, latex $...$ và ảnh ![...](...)
-  const tokenRegex = /(```[\s\S]*?```|`[^`\n]+`|\$\$[\s\S]+?\$\$|\$(?:\\\$|[^\$\n])+?\$|!\[.*?\]\(.*?\))/g;
+  const tokenRegex = /(```[\s\S]*?```|`[^`\n]+`|\$\$[\s\S]+?\$\$|\$(?:\\\$|[^\$])+?\$|!\[.*?\]\(.*?\))/g;
   const parts = text.split(tokenRegex);
 
   return parts.map(part => {
     if (!part) return '';
-    // Giữ nguyên các phần code, ảnh, hoặc đã có $...$
     if (part.startsWith('`') || part.startsWith('![') || part.startsWith('$')) {
       return part;
     }
@@ -148,7 +138,6 @@ function autoFormatMathInContent(text) {
 
 function normalizeTextWithMathSymbols(text) {
   if (!text) return '';
-  // Kiểm tra nếu đoạn văn bản chứa ký hiệu toán học Unicode
   const hasMathChars = /[²³⁴⁵⁶⁷⁸⁹⁰⁺⁻ⁿⁱˣʸ₁₂₃₄₅₆₇₈₉₀ₙᵢ≤≥≠±∓×÷≈≡∼≅∞∈∉⊂⊃⊆⊇∅∪∩∀∃⇒⇔→⊥∥∠°′″πραγδεθλμσωΔΩΣΦ√]/.test(text);
   if (!hasMathChars) {
     return text;

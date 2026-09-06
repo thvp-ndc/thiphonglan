@@ -4,6 +4,7 @@ const fs = require('node:fs');
  * imageUtils.js
  * Đọc kích thước thật (Width x Height pixel) của các tệp ảnh (PNG, JPG, GIF, WebP, BMP, SVG)
  * Giúp tính toán kích thước EMU chính xác 100% khi xuất sang Word không bị méo tỷ lệ.
+ * Hỗ trợ bóc tách và tạo thẻ Markdown có kích thước ![alt|WxH](url).
  */
 
 function getImageDimensions(imageBufferOrPath) {
@@ -91,14 +92,14 @@ function getImageDimensions(imageBufferOrPath) {
     // 6. SVG
     const str = buffer.slice(0, 1000).toString('utf8');
     if (str.includes('<svg')) {
-      const wMatch = str.match(/width=["'](d+(?:.d+)?)(?:px)?["']/i);
-      const hMatch = str.match(/height=["'](d+(?:.d+)?)(?:px)?["']/i);
+      const wMatch = str.match(/width=["'](\d+(?:\.\d+)?)(?:px)?["']/i);
+      const hMatch = str.match(/height=["'](\d+(?:\.\d+)?)(?:px)?["']/i);
       if (wMatch && hMatch) {
         return { width: parseFloat(wMatch[1]), height: parseFloat(hMatch[1]), type: 'svg' };
       }
-      const vbMatch = str.match(/viewBox=["'][d.s,-]+["']/i);
+      const vbMatch = str.match(/viewBox=["']([\d\.\s,-]+)["']/i);
       if (vbMatch) {
-        const parts = vbMatch[0].replace(/viewBox=["']|["']/gi, '').trim().split(/[s,]+/);
+        const parts = vbMatch[0].replace(/viewBox=["']|["']/gi, '').trim().split(/[\s,]+/);
         if (parts.length === 4) {
           return { width: parseFloat(parts[2]), height: parseFloat(parts[3]), type: 'svg' };
         }
@@ -110,13 +111,68 @@ function getImageDimensions(imageBufferOrPath) {
 }
 
 /**
+ * Bóc tách thông tin ảnh từ cú pháp Markdown:
+ * - ![alt|320x180](url)
+ * - ![alt|width=320,height=180](url)
+ * - ![alt](url)
+ */
+function parseImageMarkdown(markdownTag) {
+  if (!markdownTag) return null;
+  const match = markdownTag.match(/^!\[(.*?)\]\((.*?)\)$/);
+  if (!match) return null;
+
+  const rawAlt = match[1] || '';
+  const url = match[2] || '';
+  let alt = rawAlt;
+  let width = null;
+  let height = null;
+
+  if (rawAlt.includes('|')) {
+    const parts = rawAlt.split('|');
+    alt = parts[0].trim();
+    const dimPart = parts[1].trim();
+
+    // Dạng 1: 320x180
+    const dimMatch = dimPart.match(/^(\d+(?:\.\d+)?)[xX*](\d+(?:\.\d+)?)$/);
+    if (dimMatch) {
+      width = parseFloat(dimMatch[1]);
+      height = parseFloat(dimMatch[2]);
+    } else {
+      // Dạng 2: width=320,height=180 hoặc w=320,h=180
+      const wMatch = dimPart.match(/(?:width|w)\s*[:=]\s*(\d+(?:\.\d+)?)/i);
+      const hMatch = dimPart.match(/(?:height|h)\s*[:=]\s*(\d+(?:\.\d+)?)/i);
+      if (wMatch) width = parseFloat(wMatch[1]);
+      if (hMatch) height = parseFloat(hMatch[1]);
+    }
+  }
+
+  return {
+    alt: alt || 'Hình ảnh câu hỏi',
+    url,
+    width,
+    height
+  };
+}
+
+/**
+ * Tạo thẻ Markdown ảnh có kích thước: ![alt|WxH](url)
+ */
+function formatImageMarkdown(alt, url, width, height) {
+  const safeAlt = (alt || 'Hình ảnh').split('|')[0].trim();
+  if (width && height && width > 0 && height > 0) {
+    return `![${safeAlt}|${Math.round(width)}x${Math.round(height)}](${url})`;
+  }
+  return `![${safeAlt}](${url})`;
+}
+
+/**
  * Tính toán kích thước EMU (English Metric Units) cho Word DrawingML
  * 1 px = 9525 EMU (tại 96 DPI chuẩn)
  * Khổ rộng tối đa trang in A4 trong Word: ~5.5 inch = 5,029,200 EMU (~528px)
  */
-function calculateWordEmuSize(originalWidth, originalHeight, maxPageWidthPx = 520) {
-  let w = Number(originalWidth) || 500;
-  let h = Number(originalHeight) || 350;
+function calculateWordEmuSize(originalWidth, originalHeight, maxPageWidthPx = 520, targetWidth = null, targetHeight = null) {
+  let w = Number(targetWidth) || Number(originalWidth) || 500;
+  let h = Number(targetHeight) || Number(originalHeight) || 350;
 
   if (w <= 0) w = 500;
   if (h <= 0) h = 350;
@@ -142,5 +198,7 @@ function calculateWordEmuSize(originalWidth, originalHeight, maxPageWidthPx = 52
 
 module.exports = {
   getImageDimensions,
+  parseImageMarkdown,
+  formatImageMarkdown,
   calculateWordEmuSize
 };

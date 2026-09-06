@@ -5,7 +5,8 @@ import CodeBlock from './CodeBlock';
 
 /**
  * MathContent Component
- * Render công thức toán học KaTeX ($...$ và $$...$$), hình ảnh Markdown (![alt](url)),
+ * Render công thức toán học KaTeX ($...$, $$...$$, \(...\), \[...\]),
+ * hình ảnh Markdown (![alt|WxH](url)) với kích thước chính xác,
  * và khối mã nguồn Tin học (Python, HTML...) với Syntax Highlighting.
  * Hoạt động 100% Offline trên mạng LAN không cần kết nối Internet.
  */
@@ -17,11 +18,11 @@ export default function MathContent({ content = '', className = '', zoomable = t
   // Tách nội dung thành các token:
   // 1. Khối Code: ```lang\n...```
   // 2. Mã nội dòng: `code`
-  // 3. Display Math: $$...$$
-  // 4. Ảnh: ![alt](url)
-  // 5. Inline Math: $...$
+  // 3. Display Math: $$...$$ hoặc \[...\]
+  // 4. Inline Math: $...$ hoặc \(...\) (hỗ trợ cả đa dòng \n)
+  // 5. Ảnh: ![alt|WxH](url) hoặc ![alt](url)
   // 6. Xuống dòng: \n
-  const tokenRegex = /(```(?:[a-zA-Z0-9_-]+)?[\s\S]*?```|`[^`\n]+`|\$\$[\s\S]+?\$\$|!\[.*?\]\(.*?\)|\$(?:\\\$|[^\$\n])+?\$|\n)/g;
+  const tokenRegex = /(```(?:[a-zA-Z0-9_-]+)?[\s\S]*?```|`[^`\n]+`|\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|\$(?:\\\$|[^\$])+?\$|!\[.*?\]\(.*?\)|\n)/g;
   const parts = content.split(tokenRegex);
 
   return (
@@ -45,7 +46,6 @@ export default function MathContent({ content = '', className = '', zoomable = t
               }
             }
 
-            // Bỏ dòng trống đầu và cuối nếu có
             codeBody = codeBody.replace(/^\r?\n/, '').replace(/\r?\n$/, '');
 
             return (
@@ -71,9 +71,10 @@ export default function MathContent({ content = '', className = '', zoomable = t
             );
           }
 
-          // 3. Display Math: $$ ... $$
-          if (part.startsWith('$$') && part.endsWith('$$') && part.length >= 4) {
-            const math = part.slice(2, -2).trim();
+          // 3. Display Math: $$ ... $$ hoặc \[ ... \]
+          if ((part.startsWith('$$') && part.endsWith('$$') && part.length >= 4) ||
+              (part.startsWith('\\\[') && part.endsWith('\\\]') && part.length >= 4)) {
+            const math = (part.startsWith('$$') ? part.slice(2, -2) : part.slice(2, -2)).trim();
             try {
               const html = katex.renderToString(math, {
                 displayMode: true,
@@ -91,20 +92,45 @@ export default function MathContent({ content = '', className = '', zoomable = t
             }
           }
 
-          // 4. Markdown Image: ![alt](url)
+          // 4. Markdown Image: ![alt|WxH](url) hoặc ![alt](url)
           if (part.startsWith('![') && part.includes('](') && part.endsWith(')')) {
             const imgMatch = part.match(/^!\[(.*?)\]\((.*?)\)$/);
             if (imgMatch) {
-              const alt = imgMatch[1] || 'Hình ảnh câu hỏi';
+              const rawAlt = imgMatch[1] || '';
               const src = imgMatch[2];
+              let alt = rawAlt;
+              let customWidth = null;
+              let customHeight = null;
+
+              if (rawAlt.includes('|')) {
+                const altParts = rawAlt.split('|');
+                alt = altParts[0].trim();
+                const dimStr = altParts[1].trim();
+                const dimMatch = dimStr.match(/^(\d+(?:\.\d+)?)[xX*](\d+(?:\.\d+)?)$/);
+                if (dimMatch) {
+                  customWidth = parseFloat(dimMatch[1]);
+                  customHeight = parseFloat(dimMatch[2]);
+                } else {
+                  const wMatch = dimStr.match(/(?:width|w)\s*[:=]\s*(\d+(?:\.\d+)?)/i);
+                  const hMatch = dimStr.match(/(?:height|h)\s*[:=]\s*(\d+(?:\.\d+)?)/i);
+                  if (wMatch) customWidth = parseFloat(wMatch[1]);
+                  if (hMatch) customHeight = parseFloat(hMatch[1]);
+                }
+              }
+
               return (
                 <div key={index} className="my-2 text-center group relative inline-block max-w-full">
                   <div className="p-1.5 bg-white/95 rounded-xl border border-slate-700/60 shadow-md inline-block max-w-full overflow-hidden">
                     <img
                       src={src}
-                      alt={alt}
+                      alt={alt || 'Hình ảnh câu hỏi'}
+                      style={{
+                        width: customWidth ? `${customWidth}px` : 'auto',
+                        height: customHeight ? `${customHeight}px` : 'auto',
+                        maxWidth: '100%'
+                      }}
                       onClick={() => zoomable && setZoomedImage({ src, alt })}
-                      className={`max-w-full h-auto max-h-[420px] object-contain rounded-lg inline-block ${
+                      className={`h-auto max-h-[500px] object-contain rounded-lg inline-block ${
                         zoomable ? 'cursor-pointer hover:opacity-95 transition-all' : ''
                       }`}
                       loading="lazy"
@@ -126,9 +152,10 @@ export default function MathContent({ content = '', className = '', zoomable = t
             }
           }
 
-          // 5. Inline Math: $ ... $
-          if (part.startsWith('$') && part.endsWith('$') && part.length >= 2) {
-            const math = part.slice(1, -1).trim();
+          // 5. Inline Math: $ ... $ hoặc \( ... \)
+          if ((part.startsWith('$') && part.endsWith('$') && part.length >= 2) ||
+              (part.startsWith('\\\(') && part.endsWith('\\\)') && part.length >= 4)) {
+            const math = (part.startsWith('$') ? part.slice(1, -1) : part.slice(2, -2)).trim();
             try {
               const html = katex.renderToString(math, {
                 displayMode: false,
@@ -151,7 +178,23 @@ export default function MathContent({ content = '', className = '', zoomable = t
             return <br key={index} />;
           }
 
-          // 7. Plain text
+          // 7. Plain text (với cơ chế tự động nhận diện công thức LaTeX chưa bọc $)
+          if (part.includes('\\frac{') || part.includes('\\sqrt{') || part.includes('\\begin{cases}')) {
+            try {
+              const html = katex.renderToString(part, {
+                displayMode: false,
+                throwOnError: false
+              });
+              return (
+                <span
+                  key={index}
+                  className="inline-math px-0.5"
+                  dangerouslySetInnerHTML={{ __html: html }}
+                />
+              );
+            } catch (e) {}
+          }
+
           return <React.Fragment key={index}>{part}</React.Fragment>;
         })}
       </div>

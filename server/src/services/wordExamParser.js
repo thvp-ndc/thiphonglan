@@ -7,6 +7,8 @@ const { DOMParser } = require('@xmldom/xmldom');
 const { parseOMMLNode } = require('./ommlToLatex');
 const { autoFormatMathInContent } = require('./unicodeMathToLatex');
 const { normalizeTrueFalseMap } = require('./trueFalseUtils');
+const { extractMathTypeToLatex, convertWmfToWebImage } = require('./wmfUtils');
+const { formatImageMarkdown } = require('./imageUtils');
 
 /**
  * Service bóc tách đề thi từ file Word (.docx)
@@ -15,11 +17,11 @@ const { normalizeTrueFalseMap } = require('./trueFalseUtils');
  * - PHẦN II: Trắc nghiệm Đúng/Sai (4 ý a, b, c, d; đáp án Đ/S hoặc đánh dấu *)
  * - PHẦN III: Tự luận (kèm điểm số và barem chấm)
  * Hỗ trợ bóc tách công thức toán học Word Equation (OMML sang LaTeX)
- * Hỗ trợ bóc tách hình ảnh nhúng trong file Word (lưu vào server/uploads/images/)
+ * Hỗ trợ bóc tách công thức MathType (MTEF sang LaTeX)
+ * Hỗ trợ bóc tách hình ảnh nhúng và kích thước hiển thị chính xác (EMU / pt / px)
  */
 class WordExamParser {
   async parseWordBuffer(buffer) {
-    // Thử bóc tách nâng cao với JSZip để giữ trọn vẹn công thức toán và hình ảnh
     try {
       if (buffer && buffer[0] === 0x50 && buffer[1] === 0x4b) {
         const parsed = await this.parseDocxWithOmmlAndMedia(buffer);
@@ -28,10 +30,9 @@ class WordExamParser {
         }
       }
     } catch (err) {
-      console.warn('[WordExamParser] Advanced parseDocx failed, falling back to mammoth:', err.message);
+      console.warn('[WordExamParser] parseDocx failed, falling back to mammoth:', err.message);
     }
 
-    // Dự phòng bằng mammoth nếu file là định dạng cũ hoặc cấu trúc lạ
     const result = await mammoth.extractRawText({ buffer });
     const fullText = result.value || '';
     return this.parseExamText(fullText);
@@ -44,19 +45,19 @@ class WordExamParser {
       throw new Error('word/document.xml không tồn tại trong file .docx');
     }
 
-    // 1. Trích xuất quan hệ hình ảnh từ word/_rels/document.xml.rels
+    // 1. Trích xuất quan hệ hình ảnh & đối tượng nhúng từ word/_rels/document.xml.rels
     const relMap = {};
     const relsFile = zip.file('word/_rels/document.xml.rels');
+    const uploadsDir = path.resolve(__dirname, '../../uploads/images');
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+
     if (relsFile) {
       try {
         const relsXml = await relsFile.async('text');
         const relsDom = new DOMParser().parseFromString(relsXml, 'text/xml');
         const relElements = relsDom.getElementsByTagName('Relationship');
-
-        const uploadsDir = path.resolve(__dirname, '../../uploads/images');
-        if (!fs.existsSync(uploadsDir)) {
-          fs.mkdirSync(uploadsDir, { recursive: true });
-        }
 
         for (let i = 0; i < relElements.length; i++) {
           const rel = relElements[i];
@@ -64,25 +65,48 @@ class WordExamParser {
           const rId = rel.getAttribute('Id') || '';
           let target = rel.getAttribute('Target') || '';
 
-          if (type.includes('/image') && rId && target) {
-            // Chuẩn hóa đường dẫn file ảnh trong zip
-            let zipImgPath = target;
-            if (zipImgPath.startsWith('../')) {
-              zipImgPath = zipImgPath.replace(/^\.\.\//, 'word/');
-            } else if (!zipImgPath.startsWith('word/')) {
-              zipImgPath = 'word/' + zipImgPath.replace(/^\//, '');
-            }
+          if (!rId || !target) continue;
 
-            const imgFileInZip = zip.file(zipImgPath);
-            if (imgFileInZip) {
-              const imgBuffer = await imgFileInZip.async('nodebuffer');
-              const ext = path.extname(zipImgPath).toLowerCase() || '.png';
-              const fileName = `word_${Date.now()}_${crypto.randomBytes(4).toString('hex')}${ext}`;
-              const diskPath = path.join(uploadsDir, fileName);
-              fs.writeFileSync(diskPath, imgBuffer);
-              relMap[rId] = `/uploads/images/${fileName}`;
+          let zipPath = target;
+          if (zipPath.startsWith('../')) {
+            zipPath = zipPath.replace(/^\.\.\//, 'word/');
+          } else if (!zipPath.startsWith('word/')) {
+            zipPath = 'word/' + zipPath.replace(/^\//, '');
+          }
+
+          const fileInZip = zip.file(zipPath);
+          if (!fileInZip) continue;
+
+          const fileBuffer = await fileInZip.async('nodebuffer');
+
+          // A. Kiểm tra nếu là tệp nhúng MathType OLE (.bin) hoặc WMF/EMF chứa công thức
+          const mathTypeLatex = extractMathTypeToLatex(fileBuffer);
+          if (mathTypeLatex) {
+            relMap[rId] = { isMath: true, latex: mathTypeLatex };
+            continue;
+          }
+
+          // B. Xử lý ảnh thông thường hoặc chuyển đổi WMF/EMF sang định dạng web
+          let ext = path.extname(zipPath).toLowerCase().replace('.', '') || 'png';
+          let finalBuffer = fileBuffer;
+
+          if (ext === 'wmf' || ext === 'emf') {
+            const converted = convertWmfToWebImage(fileBuffer);
+            if (converted) {
+              finalBuffer = converted.buffer;
+              ext = converted.ext;
             }
           }
+
+          const fileName = `word_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.${ext}`;
+          const diskPath = path.join(uploadsDir, fileName);
+          fs.writeFileSync(diskPath, finalBuffer);
+
+          relMap[rId] = {
+            isMath: false,
+            url: `/uploads/images/${fileName}`,
+            fileName
+          };
         }
       } catch (e) {
         console.warn('[WordExamParser] Lỗi trích xuất quan hệ ảnh rels:', e.message);
@@ -107,7 +131,6 @@ class WordExamParser {
   isCodeParagraph(pNode) {
     if (!pNode || pNode.nodeType !== 1) return false;
 
-    // 1. Kiểm tra <w:pPr> -> <w:pStyle w:val="..."/>
     const pPr = pNode.getElementsByTagName('w:pPr')[0];
     if (pPr) {
       const pStyle = pPr.getElementsByTagName('w:pStyle')[0];
@@ -117,7 +140,6 @@ class WordExamParser {
       }
     }
 
-    // 2. Kiểm tra font Consolas/Courier trong các run <w:r> hoặc <w:rFonts>
     const rFontsList = pNode.getElementsByTagName('w:rFonts');
     if (rFontsList.length > 0) {
       for (let i = 0; i < rFontsList.length; i++) {
@@ -148,7 +170,6 @@ class WordExamParser {
           rawParagraphs.push({ text: pText, isCode });
         }
       } else if (tag === 'tbl') {
-        // Hỗ trợ duyệt qua bảng
         const rows = child.getElementsByTagName('w:tr');
         for (let r = 0; r < rows.length; r++) {
           const cells = rows[r].getElementsByTagName('w:tc');
@@ -176,16 +197,14 @@ class WordExamParser {
       const joinedCode = codeBuffer.join('\n');
       codeBuffer = [];
 
-      // Nếu đã có dấu bọc ``` thì không bọc lặp lại
       if (joinedCode.trim().startsWith('```') && joinedCode.trim().endsWith('```')) {
         finalParagraphs.push(joinedCode);
         return;
       }
 
-      // Xác định ngôn ngữ: HTML hay Python
       const isHtml = /<!DOCTYPE|<html|<body|<div|<table|<tr|<td|<form|<style|<script|<\//i.test(joinedCode);
       const lang = isHtml ? 'html' : 'python';
-      finalParagraphs.push(`\`\`\`${lang}\n${joinedCode}\n\`\`\``);
+      finalParagraphs.push(```${lang}\n${joinedCode}\n```);
     };
 
     for (let i = 0; i < rawParagraphs.length; i++) {
@@ -209,15 +228,26 @@ class WordExamParser {
 
     const tag = node.localName || node.nodeName.split(':').pop();
 
+    // 1. Công thức Word OMML
     if (tag === 'oMath' || tag === 'oMathPara') {
       const latex = parseOMMLNode(node);
       return latex ? ` ${latex} ` : '';
     }
 
+    // 2. Hình ảnh hoặc đối tượng nhúng MathType OLE / DrawingML / VML
     if (tag === 'drawing' || tag === 'pict' || tag === 'object' || tag === 'shape' || tag === 'imagedata' || tag === 'graphic') {
       const rId = this.findEmbedId(node);
       if (rId && relMap && relMap[rId]) {
-        return `\n![Hình ảnh](${relMap[rId]})\n`;
+        const mediaInfo = relMap[rId];
+        // Nếu đối tượng là công thức MathType
+        if (mediaInfo.isMath && mediaInfo.latex) {
+          return ` ${mediaInfo.latex} `;
+        }
+
+        // Nếu là ảnh thông thường -> Đọc kích thước hiển thị (DrawingML extent hoặc VML style)
+        const dims = this.extractImageDisplayDimensions(node);
+        const imgMd = formatImageMarkdown('Hình ảnh', mediaInfo.url, dims.width, dims.height);
+        return `\n${imgMd}\n`;
       }
     }
 
@@ -226,7 +256,7 @@ class WordExamParser {
     }
 
     if (tag === 'tab') {
-      return '    '; // 4 dấu cách cho tab thụt lề
+      return '    ';
     }
 
     if (tag === 'br' || tag === 'cr') {
@@ -238,6 +268,71 @@ class WordExamParser {
       text += this.extractNodeText(child, relMap);
     }
     return text;
+  }
+
+  extractImageDisplayDimensions(element) {
+    let width = null;
+    let height = null;
+    if (!element) return { width, height };
+
+    // 1. DrawingML: <wp:extent cx="..." cy="..."/>
+    const extElements = element.getElementsByTagName('wp:extent');
+    if (extElements.length > 0) {
+      const cx = parseInt(extElements[0].getAttribute('cx'), 10);
+      const cy = parseInt(extElements[0].getAttribute('cy'), 10);
+      if (cx > 0 && cy > 0) {
+        width = Math.round(cx / 9525);
+        height = Math.round(cy / 9525);
+        return { width, height };
+      }
+    }
+
+    // 2. DrawingML a:ext: <a:ext cx="..." cy="..."/>
+    const aExtElements = element.getElementsByTagName('a:ext');
+    if (aExtElements.length > 0) {
+      const cx = parseInt(aExtElements[0].getAttribute('cx'), 10);
+      const cy = parseInt(aExtElements[0].getAttribute('cy'), 10);
+      if (cx > 0 && cy > 0) {
+        width = Math.round(cx / 9525);
+        height = Math.round(cy / 9525);
+        return { width, height };
+      }
+    }
+
+    // 3. VML style: Kiểm tra thuộc tính style trên chính element hoặc các thẻ con (v:shape, shape...)
+    const findStyleAttr = (el) => {
+      if (!el) return null;
+      if (el.getAttribute && el.getAttribute('style')) {
+        const st = el.getAttribute('style');
+        if (/width/i.test(st)) return st;
+      }
+      for (let child = el.firstChild; child; child = child.nextSibling) {
+        if (child.nodeType === 1) {
+          const res = findStyleAttr(child);
+          if (res) return res;
+        }
+      }
+      return null;
+    };
+
+    const styleAttr = findStyleAttr(element);
+    if (styleAttr) {
+      const wMatch = styleAttr.match(/width\s*:\s*([\d.]+)(pt|in|cm|px)?/i);
+      const hMatch = styleAttr.match(/height\s*:\s*([\d.]+)(pt|in|cm|px)?/i);
+      if (wMatch && hMatch) {
+        const parseUnit = (val, unit) => {
+          const num = parseFloat(val);
+          if (unit === 'pt') return num * 1.3333;
+          if (unit === 'in') return num * 96;
+          if (unit === 'cm') return num * 37.8;
+          return num;
+        };
+        width = Math.round(parseUnit(wMatch[1], wMatch[2]?.toLowerCase()));
+        height = Math.round(parseUnit(hMatch[1], hMatch[2]?.toLowerCase()));
+      }
+    }
+
+    return { width, height };
   }
 
   findEmbedId(element) {
@@ -273,7 +368,6 @@ class WordExamParser {
       throw new Error('File Word rỗng hoặc không có văn bản');
     }
 
-    // Tiền xử lý: nếu 1 dòng chứa cả 4 đáp án A. ... B. ... C. ... D. ... thì tách ra từng dòng (ngoại trừ khối code)
     const lines = [];
     let insidePreFence = false;
     for (const line of rawLines) {
@@ -297,30 +391,22 @@ class WordExamParser {
 
     const questions = [];
     let currentQ = null;
-    let currentSection = 'single_choice'; // 'single_choice' | 'true_false' | 'essay'
+    let currentSection = 'single_choice';
     let insideCodeFence = false;
 
-    // Regex patterns for section headers
     const part1Regex = /^\s*(?:PHẦN|Phần)\s*(?:I|1|A)?[.:\s-]*(?:CÂU\s+(?:HỎI\s+)?)?(?:TRẮC\s*NGHIỆM\s+)?(?:NHIỀU|NHIEU)/i;
     const part2Regex = /^\s*(?:PHẦN|Phần)\s*(?:II|2|B)?[.:\s-]*(?:CÂU\s+(?:HỎI\s+)?)?(?:TRẮC\s*NGHIỆM\s+)?(?:ĐÚNG|DUNG)/i;
     const part3Regex = /^\s*(?:PHẦN|Phần)\s*(?:III|3|C)?[.:\s-]*(?:CÂU\s+(?:HỎI\s+)?)?(?:TỰ|TƯ|TU)\s*LUẬN/i;
 
     const questionHeaderRegex = /^\s*(?:Câu|CÂU|Bài|BÀI)\s*(\d+)[\s:.-]+(.*)/i;
-    
-    // MCQ Options A, B, C, D (Upper case)
     const mcqOptionRegex = /^\s*([*]?[A-D][*]?|[A-D]\*|\([A-D]\)|\[[A-D]\])[\s:.)-]+(.*)/;
-    
-    // True/False Sub-items a, b, c, d (Lower case)
     const tfSubItemRegex = /^\s*([*]?[a-d][*]?|[a-d]\*|\([a-d]\)|\[[a-d]\])[\s:.)-]+(.*)/;
-    
-    // Answer tags
     const answerTagRegex = /^\s*(?:Đáp án|ĐA|Đáp án đúng|ĐÁP ÁN)[\s:.-]*(.*)/i;
     const scoreRegex = /\((\d+(?:[,.]\d+)?)\s*(?:điểm|đ|d)\)/i;
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
 
-      // 0. Xử lý khối mã nguồn (Code Fence)
       if (line.trim().startsWith('```')) {
         insideCodeFence = !insideCodeFence;
         if (currentQ) {
@@ -336,7 +422,6 @@ class WordExamParser {
         continue;
       }
 
-      // Khi đang nằm trong khối code, giữ nguyên toàn bộ ký tự và thụt lề, không check pattern
       if (insideCodeFence && currentQ) {
         if (currentQ.options.length === 0 && !currentQ.rubric_guide) {
           currentQ.content += (currentQ.content ? '\n' : '') + line;
@@ -349,7 +434,6 @@ class WordExamParser {
         continue;
       }
 
-      // Check section transitions
       if (part3Regex.test(line)) {
         currentSection = 'essay';
         if (currentQ) {
@@ -375,7 +459,6 @@ class WordExamParser {
         continue;
       }
 
-      // Check for Question Header: "Câu 1: ...", "Câu 2: ..."
       const qMatch = line.match(questionHeaderRegex);
       if (qMatch) {
         if (currentQ) {
@@ -385,7 +468,6 @@ class WordExamParser {
         const qNum = parseInt(qMatch[1], 10);
         let content = qMatch[2].trim();
 
-        // Check if question specifies score e.g. (2.0 điểm)
         let maxScore = null;
         const scoreMatch = content.match(scoreRegex) || line.match(scoreRegex);
         if (scoreMatch) {
@@ -393,7 +475,6 @@ class WordExamParser {
           content = content.replace(scoreRegex, '').trim();
         }
 
-        // Check if explicitly marked as essay or true_false in title
         const isExplicitEssay = /tự luận|TL/i.test(line);
         const isExplicitTF = /đúng[\s/]*sai|Đ\/S/i.test(line);
 
@@ -422,7 +503,6 @@ class WordExamParser {
 
       if (!currentQ) continue;
 
-      // 1. Check for True/False Sub-items a), b), c), d) (Lower case)
       const tfMatch = line.match(tfSubItemRegex);
       if (tfMatch && currentQ.question_type !== 'essay') {
         currentQ.question_type = 'true_false';
@@ -452,7 +532,6 @@ class WordExamParser {
         continue;
       }
 
-      // 2. Check for Standard MCQ Options A, B, C, D (Upper case)
       const mcqMatch = line.match(mcqOptionRegex);
       if (mcqMatch && currentQ.question_type !== 'essay' && currentQ.question_type !== 'true_false') {
         let optPrefix = mcqMatch[1];
@@ -479,12 +558,9 @@ class WordExamParser {
         continue;
       }
 
-      // 3. Check for Answer Tag at end of question
       const ansMatch = line.match(answerTagRegex);
       if (ansMatch && currentQ.question_type !== 'essay') {
         const ansRaw = ansMatch[1].trim();
-
-        // Check if this is a True/False answer line: e.g. "a - Đ, b - S, c - Đ, d - Đ"
         const tfPairRegex = /([a-d])[\s:.-]+([ĐSđsTFtf]|Đúng|Sai|True|False)/gi;
         const matches = [...ansRaw.matchAll(tfPairRegex)];
 
@@ -500,7 +576,6 @@ class WordExamParser {
             currentQ.correct_answers[subKey] = isT ? 'T' : 'F';
           });
         } else {
-          // Standard MCQ answer: e.g. "Đáp án: B"
           const correctLetters = ansRaw.replace(/[^A-D]/g, '').split('');
           if (correctLetters.length > 0) {
             currentQ.correct_answers = correctLetters;
@@ -509,17 +584,14 @@ class WordExamParser {
         continue;
       }
 
-      // 4. Check for Rubric / Barem guide in Essay question
       if (currentQ.question_type === 'essay' && /^(?:Hướng dẫn chấm|Barem|Đáp án mẫu|Gợi ý)[\s:.-]/i.test(line)) {
         currentQ.rubric_guide += line + '\n';
         continue;
       }
 
-      // Additional text lines: either extra lines of question body, or extra line of an option (e.g. image or multiline)
       if (currentQ.options.length === 0 && !currentQ.rubric_guide) {
         currentQ.content += (currentQ.content ? '\n' : '') + line;
       } else if (currentQ.options.length > 0 && !currentQ.rubric_guide && currentQ.question_type !== 'essay') {
-        // Append line (e.g. image or equation) to the latest option
         const lastOpt = currentQ.options[currentQ.options.length - 1];
         lastOpt.text += (lastOpt.text ? '\n' : '') + line;
       } else if (currentQ.rubric_guide) {
@@ -547,8 +619,6 @@ class WordExamParser {
       return [line];
     }
 
-    // Tách dòng có nhiều phương án: "A. ... B. ... C. ... D. ..."
-    // Kiểm tra xem dòng có chứa ít nhất 2 phương án trở lên
     const pattern = /(?:^|\s+)((?:[*]?)[A-D][*]?|[A-D]\*|\([A-D]\)|\[[A-D]\])[\s:.)-]+/g;
     const matches = [...line.matchAll(pattern)];
 
@@ -568,13 +638,11 @@ class WordExamParser {
   autoFenceCodeInText(text) {
     if (!text || text.includes('```')) return text;
 
-    // 1. Phát hiện khối mã nguồn HTML
     const htmlBlockRegex = /(<(?:table|form|html|body|div|ul|ol)[\s\S]*?<\/(?:table|form|html|body|div|ul|ol)>)/i;
     if (htmlBlockRegex.test(text)) {
       return text.replace(htmlBlockRegex, '\n```html\n$1\n```\n');
     }
 
-    // 2. Phát hiện khối mã nguồn Python
     const lines = text.split('\n');
     const newLines = [];
     let pyBlock = [];
@@ -621,7 +689,6 @@ class WordExamParser {
   finalizeQuestion(q, questionsList) {
     if (q.question_type === 'true_false') {
       if (!q.options || q.options.length < 2) {
-        // Fallback if not enough options
         q.question_type = 'essay';
         q.max_score = q.max_score === 1.0 ? 2.5 : q.max_score;
       } else {

@@ -29,7 +29,6 @@ function parseOMMLNode(node) {
         mathParts.push(parseOMMLNode(child));
       }
       let mathStr = mathParts.join('').trim();
-      // Remove double spaces
       mathStr = mathStr.replace(/\s+/g, ' ');
       return mathStr ? `$${mathStr}$` : '';
     }
@@ -48,13 +47,32 @@ function parseOMMLNode(node) {
     case 'f': { // Fraction
       let num = '';
       let den = '';
+      let isSkewed = false;
+      let isNoBar = false;
+
       for (let child = node.firstChild; child; child = child.nextSibling) {
         const childTag = child.localName || child.nodeName.split(':').pop();
-        if (childTag === 'num') {
+        if (childTag === 'fPr') {
+          for (let pr = child.firstChild; pr; pr = pr.nextSibling) {
+            const prTag = pr.localName || pr.nodeName.split(':').pop();
+            if (prTag === 'type') {
+              const val = pr.getAttribute('m:val') || pr.getAttribute('val');
+              if (val === 'skw' || val === 'lin') isSkewed = true;
+              else if (val === 'noBar') isNoBar = true;
+            }
+          }
+        } else if (childTag === 'num') {
           num = parseOMMLChildren(child);
         } else if (childTag === 'den') {
           den = parseOMMLChildren(child);
         }
+      }
+
+      if (isSkewed) {
+        return `${num.trim()}/${den.trim()}`;
+      }
+      if (isNoBar) {
+        return `\\binom{${num.trim()}}{${den.trim()}}`;
       }
       return `\\frac{${num.trim()}}{${den.trim()}}`;
     }
@@ -121,7 +139,7 @@ function parseOMMLNode(node) {
       return `{${base}}_{${sub}}^{${sup}}`;
     }
 
-    case 'sPre': { // Prescript (Trước base)
+    case 'sPre': { // Prescript
       let base = '';
       let sub = '';
       let sup = '';
@@ -141,7 +159,10 @@ function parseOMMLNode(node) {
     case 'd': { // Delimiter
       let begChr = '(';
       let endChr = ')';
+      let hasCustomBeg = false;
+      let hasCustomEnd = false;
       const elements = [];
+
       for (let child = node.firstChild; child; child = child.nextSibling) {
         const childTag = child.localName || child.nodeName.split(':').pop();
         if (childTag === 'dPr') {
@@ -149,8 +170,10 @@ function parseOMMLNode(node) {
             const prTag = pr.localName || pr.nodeName.split(':').pop();
             if (prTag === 'begChr') {
               begChr = pr.getAttribute('m:val') ?? pr.getAttribute('val') ?? '(';
+              hasCustomBeg = true;
             } else if (prTag === 'endChr') {
               endChr = pr.getAttribute('m:val') ?? pr.getAttribute('val') ?? ')';
+              hasCustomEnd = true;
             }
           }
         } else if (childTag === 'e') {
@@ -158,8 +181,8 @@ function parseOMMLNode(node) {
         }
       }
 
-      if (begChr === '{' && (!endChr || endChr === '' || endChr === '|' || endChr === '.')) {
-        // Hệ phương trình hoặc hàm từng khúc
+      // Xử lý hệ phương trình: begChr là '{' và endChr không có hoặc để trống
+      if (begChr === '{' && (!hasCustomEnd || !endChr || endChr === '' || endChr === '|' || endChr === '.' || endChr === ')')) {
         return `\\begin{cases} ${elements.join(' \\\\ ')} \\end{cases}`;
       }
 
@@ -178,7 +201,7 @@ function parseOMMLNode(node) {
       return `${left}${elements.join(', ')}${right}`;
     }
 
-    case 'nary': { // N-ary (Integral, Sum, Product, Contour)
+    case 'nary': { // N-ary (Integral, Sum, Product)
       let chr = '\\int';
       let sub = '';
       let sup = '';
@@ -222,10 +245,13 @@ function parseOMMLNode(node) {
         if (childTag === 'e') e = parseOMMLChildren(child).trim();
         else if (childTag === 'lim') lim = parseOMMLChildren(child).trim();
       }
+      if (e === 'max' || e === 'min' || e === 'sup' || e === 'inf') {
+        return `\\${e}_{${lim}}`;
+      }
       return `${e}_{${lim}}`;
     }
 
-    case 'limUpp': { // Limit Upper
+    case 'limUpp': {
       let e = '\\lim';
       let lim = '';
       for (let child = node.firstChild; child; child = child.nextSibling) {
@@ -236,7 +262,7 @@ function parseOMMLNode(node) {
       return `${e}^{${lim}}`;
     }
 
-    case 'func': { // Function like sin, cos, tan, ln, log
+    case 'func': {
       let fName = '';
       let e = '';
       for (let child = node.firstChild; child; child = child.nextSibling) {
@@ -249,7 +275,7 @@ function parseOMMLNode(node) {
 
     case 'acc': { // Accent / Vector / Hat / Dot
       let e = '';
-      let chr = '\u20D7'; // default right arrow
+      let chr = '\u20D7';
       for (let child = node.firstChild; child; child = child.nextSibling) {
         const childTag = child.localName || child.nodeName.split(':').pop();
         if (childTag === 'accPr') {
@@ -266,6 +292,7 @@ function parseOMMLNode(node) {
       if (chr === '..' || chr === '̈') return `\\ddot{${e}}`;
       if (chr === '\u0304' || chr === '_' || chr === '̄') return `\\bar{${e}}`;
       if (chr === '~' || chr === '̃') return `\\tilde{${e}}`;
+      if (e.length > 2) return `\\overrightarrow{${e}}`;
       return `\\vec{${e}}`;
     }
 
@@ -294,7 +321,7 @@ function parseOMMLNode(node) {
       return `\\begin{pmatrix} ${rows.join(' \\\\ ')} \\end{pmatrix}`;
     }
 
-    case 'eqArr': { // Equation Array
+    case 'eqArr': {
       const rows = [];
       for (let child = node.firstChild; child; child = child.nextSibling) {
         const childTag = child.localName || child.nodeName.split(':').pop();
@@ -313,7 +340,7 @@ function parseOMMLNode(node) {
       return parseOMMLChildren(node);
     }
 
-    case 'groupChr': { // Overbrace / Underbrace
+    case 'groupChr': {
       let e = '';
       let pos = 'bot';
       for (let child = node.firstChild; child; child = child.nextSibling) {
@@ -346,6 +373,13 @@ function parseOMMLChildren(node) {
 
 function cleanMathText(text) {
   if (!text) return '';
+  
+  // Kiểm tra nếu đoạn chữ có chứa tiếng Việt có dấu thì bọc vào \text{...}
+  const hasVietnamese = /[àáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđ]/i.test(text);
+  if (hasVietnamese && !text.includes('\\text{')) {
+    return ` \\text{${text.trim()}} `;
+  }
+
   return text
     .replace(/\u2212/g, '-')
     .replace(/\u00D7/g, ' \\times ')
