@@ -72,6 +72,21 @@ class StudentService {
     return true;
   }
 
+  deleteStudents(ids = []) {
+    if (!Array.isArray(ids) || ids.length === 0) return { deletedCount: 0 };
+    const placeholders = ids.map(() => '?').join(',');
+    const stmt = db.prepare(`DELETE FROM students WHERE id IN (${placeholders})`);
+    const info = stmt.run(...ids);
+    return { deletedCount: info.changes };
+  }
+
+  deleteStudentsByClass(className) {
+    if (!className) throw new Error('Vui lòng chỉ định tên lớp cần xóa');
+    const stmt = db.prepare('DELETE FROM students WHERE UPPER(class_name) = UPPER(?)');
+    const info = stmt.run(className.trim());
+    return { deletedCount: info.changes };
+  }
+
   importStudentsFromExcel(fileBuffer) {
     const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
     const sheetName = workbook.SheetNames[0];

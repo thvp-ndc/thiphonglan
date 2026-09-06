@@ -454,6 +454,31 @@ router.delete('/students/:id', (req, res) => {
   }
 });
 
+router.post('/students/batch-delete', (req, res) => {
+  try {
+    const { ids, className } = req.body;
+    if (className) {
+      const result = studentService.deleteStudentsByClass(className);
+      return res.json({
+        success: true,
+        count: result.deletedCount,
+        message: `Đã xóa thành công ${result.deletedCount} học sinh của lớp ${className}`
+      });
+    }
+    if (Array.isArray(ids) && ids.length > 0) {
+      const result = studentService.deleteStudents(ids);
+      return res.json({
+        success: true,
+        count: result.deletedCount,
+        message: `Đã xóa thành công ${result.deletedCount} học sinh đã chọn`
+      });
+    }
+    return res.status(400).json({ success: false, message: 'Không có học sinh nào được chọn để xóa' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 router.get('/students/lookup/:code', (req, res) => {
   try {
     const student = studentService.getStudentByCode(req.params.code);
