@@ -8,6 +8,7 @@ export default function StudentLogin({ onLoginSuccess }) {
   const [className, setClassName] = useState('');
   const [isAutoIdentified, setIsAutoIdentified] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
+  const [notFound, setNotFound] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -17,10 +18,14 @@ export default function StudentLogin({ onLoginSuccess }) {
     if (!code) {
       setIsAutoIdentified(false);
       setIsSearching(false);
+      setNotFound(false);
+      setStudentName('');
+      setClassName('');
       return;
     }
 
     setIsSearching(true);
+    setNotFound(false);
     const timer = setTimeout(async () => {
       try {
         const res = await fetch(`/api/students/lookup/${encodeURIComponent(code)}`);
@@ -29,9 +34,11 @@ export default function StudentLogin({ onLoginSuccess }) {
           setStudentName(data.student.student_name || '');
           setClassName(data.student.class_name || '');
           setIsAutoIdentified(true);
+          setNotFound(false);
           setError('');
         } else {
           setIsAutoIdentified(false);
+          setNotFound(true);
         }
       } catch (e) {
         setIsAutoIdentified(false);
@@ -60,8 +67,8 @@ export default function StudentLogin({ onLoginSuccess }) {
 
   const handleLogin = async (e) => {
     e.preventDefault();
-    if (!sessionCode.trim() || !studentCode.trim() || !studentName.trim()) {
-      setError('Vui lòng điền đầy đủ Mã ca thi, Số báo danh và Họ tên.');
+    if (!sessionCode.trim() || !studentCode.trim()) {
+      setError('Vui lòng điền đầy đủ Mã ca thi và Số báo danh.');
       return;
     }
 
@@ -158,13 +165,13 @@ export default function StudentLogin({ onLoginSuccess }) {
 
             {/* Thông tin học sinh tự động nhận diện */}
             {isAutoIdentified && (
-              <div className="mt-2.5 p-3 bg-emerald-950/40 border border-emerald-500/40 rounded-xl">
+              <div className="mt-2.5 p-3.5 bg-emerald-950/40 border border-emerald-500/40 rounded-xl animate-fadeIn">
                 <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400 mb-1">
                   <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
                   <span>Xác nhận thông tin thí sinh:</span>
                 </div>
                 <div className="text-sm font-bold text-white flex items-center gap-2 pl-5">
-                  <span>{studentName}</span>
+                  <span className="text-base text-emerald-100">{studentName}</span>
                   {className && (
                     <span className="px-2 py-0.5 bg-emerald-900/60 text-emerald-300 text-xs rounded-md border border-emerald-700/50">
                       Lớp {className}
@@ -173,29 +180,13 @@ export default function StudentLogin({ onLoginSuccess }) {
                 </div>
               </div>
             )}
-          </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">Họ Và Tên Thí Sinh</label>
-            <input
-              type="text"
-              value={studentName}
-              onChange={e => setStudentName(e.target.value)}
-              placeholder="Họ và tên thí sinh..."
-              className={`w-full bg-slate-950 border ${isAutoIdentified ? 'border-emerald-500/40 bg-slate-950/80' : 'border-slate-800'} rounded-xl py-2.5 px-3 text-white focus:border-sky-500 focus:outline-none text-sm placeholder:text-slate-600`}
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">Lớp / Đơn Vị</label>
-            <input
-              type="text"
-              value={className}
-              onChange={e => setClassName(e.target.value)}
-              placeholder="Lớp / Đơn vị..."
-              className={`w-full bg-slate-950 border ${isAutoIdentified ? 'border-emerald-500/40 bg-slate-950/80' : 'border-slate-800'} rounded-xl py-2.5 px-3 text-white focus:border-sky-500 focus:outline-none text-sm placeholder:text-slate-600`}
-            />
+            {notFound && !isSearching && (
+              <div className="mt-2 text-xs text-amber-400/90 pl-1 flex items-center gap-1.5">
+                <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                <span>Không tìm thấy SBD trong danh sách học sinh. Vui lòng kiểm tra lại.</span>
+              </div>
+            )}
           </div>
 
           <div className="pt-2">

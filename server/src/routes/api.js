@@ -462,9 +462,20 @@ router.post('/students/import-excel', (req, res) => {
 // 5. STUDENT EXAM WORKFLOW
 router.post('/student/join', (req, res) => {
   try {
-    const { sessionCode, studentCode, studentName, className } = req.body;
-    if (!sessionCode || !studentCode || !studentName) {
-      return res.status(400).json({ success: false, message: 'Vui lòng điền đủ Mã ca thi, SBD và Họ tên' });
+    let { sessionCode, studentCode, studentName, className } = req.body;
+    if (!sessionCode || !studentCode) {
+      return res.status(400).json({ success: false, message: 'Vui lòng điền đủ Mã ca thi và Số báo danh (SBD)' });
+    }
+
+    // Tự động tìm kiếm họ tên và lớp nếu chưa có trong request
+    if (!studentName) {
+      const st = studentService.getStudentByCode(studentCode);
+      if (st) {
+        studentName = st.student_name;
+        className = className || st.class_name || '';
+      } else {
+        studentName = studentCode.trim().toUpperCase();
+      }
     }
 
     const session = examService.getSessionByCode(sessionCode);
