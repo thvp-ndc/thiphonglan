@@ -9,7 +9,7 @@ import { BookOpen, Laptop, FileEdit, Award, Wifi, Users, Globe, Copy, Check, Dow
 export default function TeacherDashboard() {
   const [currentTab, setCurrentTab] = useState('exams'); // 'exams', 'students', 'monitor', 'grading', 'results'
   const [activeSessionId, setActiveSessionId] = useState(null);
-  const [serverInfo, setServerInfo] = useState({ serverIp: '...', port: 3000, primaryDomain: 'thionline.ndc' });
+  const [serverInfo, setServerInfo] = useState({ serverIp: '...', port: 3000, primaryDomain: 'thionline.local' });
   const [showDomainModal, setShowDomainModal] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -37,7 +37,7 @@ export default function TeacherDashboard() {
     setCurrentTab('results');
   };
 
-  const studentDomainUrl = serverInfo.studentDomainUrl || `http://${serverInfo.primaryDomain || 'thionline.ndc'}:${serverInfo.port || 3000}/student`;
+  const studentDomainUrl = serverInfo.studentDomainUrl || `http://${serverInfo.primaryDomain || 'thionline.local'}:${serverInfo.port || 3000}/student`;
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(studentDomainUrl);
@@ -63,7 +63,7 @@ export default function TeacherDashboard() {
                 className="flex items-center gap-1.5 px-2 py-0.5 bg-emerald-950/80 hover:bg-emerald-900/80 text-emerald-300 border border-emerald-700/60 rounded-md font-mono transition"
                 title="Bấm để xem hướng dẫn và tải lối tắt tên miền cho học sinh"
               >
-                <Globe className="w-3.5 h-3.5 text-emerald-400" /> Tên miền: <strong>{serverInfo.primaryDomain || 'thionline.ndc'}</strong>
+                <Globe className="w-3.5 h-3.5 text-emerald-400" /> Tên miền: <strong>{serverInfo.primaryDomain || 'thionline.local'}</strong>
               </button>
               <span>•</span>
               <span className="flex items-center gap-1 text-slate-400">
@@ -219,7 +219,7 @@ export default function TeacherDashboard() {
                   </button>
                 </div>
                 <p className="text-[11px] text-slate-400 mt-2">
-                  💡 Học sinh có thể gõ ngắn gọn: <strong className="text-white font-mono">{serverInfo.primaryDomain || 'thionline.ndc'}:{serverInfo.port || 3000}</strong> hoặc <strong className="text-white font-mono">{serverInfo.primaryDomain || 'thionline.ndc'}</strong>
+                  💡 Học sinh có thể gõ ngắn gọn: <strong className="text-white font-mono">{serverInfo.primaryDomain || 'thionline.local'}:{serverInfo.port || 3000}</strong> hoặc <strong className="text-white font-mono">{serverInfo.primaryDomain || 'thionline.local'}</strong>
                 </p>
               </div>
 
@@ -230,7 +230,7 @@ export default function TeacherDashboard() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
                   <a
                     href="/api/system/download-launcher"
-                    download="ThiOnline_NDC.html"
+                    download="ThiOnline.html"
                     className="p-3 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-left transition flex items-center gap-2.5 group"
                   >
                     <Download className="w-4 h-4 text-sky-400 group-hover:scale-110 transition" />
@@ -242,7 +242,7 @@ export default function TeacherDashboard() {
 
                   <a
                     href="/api/system/download-bat"
-                    download="CaiDatPhongMay_NDC.bat"
+                    download="CaiDatPhongMay.bat"
                     className="p-3 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-left transition flex items-center gap-2.5 group"
                   >
                     <Download className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition" />

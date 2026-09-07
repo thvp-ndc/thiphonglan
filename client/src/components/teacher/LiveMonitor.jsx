@@ -12,7 +12,7 @@ export default function LiveMonitor({ sessionId, onBack, onOpenEssayGrading, onO
   const [extraMinutes, setExtraMinutes] = useState(5);
   const [startingExam, setStartingExam] = useState(false);
   const [remainingSeconds, setRemainingSeconds] = useState(0);
-  const [serverInfo, setServerInfo] = useState({ serverIp: '...', port: 3000, primaryDomain: 'thionline.ndc' });
+  const [serverInfo, setServerInfo] = useState({ serverIp: '...', port: 3000, primaryDomain: 'thionline.local' });
   const [copiedLink, setCopiedLink] = useState(false);
 
   useEffect(() => {
@@ -417,7 +417,7 @@ export default function LiveMonitor({ sessionId, onBack, onOpenEssayGrading, onO
             <div className="flex items-center gap-2">
               <span className="text-xs text-slate-400 font-medium">Học sinh mở trình duyệt gõ tên miền:</span>
               <span className="px-2 py-0.5 bg-emerald-950 text-emerald-300 border border-emerald-700/80 rounded font-mono font-bold text-sm select-all">
-                http://{serverInfo.primaryDomain || 'thionline.ndc'}:{serverInfo.port || 3000}
+                http://{serverInfo.primaryDomain || 'thionline.local'}:{serverInfo.port || 3000}
               </span>
               <span className="text-xs text-slate-500 font-mono">(hoặc IP: {serverInfo.serverIp}:{serverInfo.port})</span>
             </div>
@@ -432,7 +432,7 @@ export default function LiveMonitor({ sessionId, onBack, onOpenEssayGrading, onO
         <div className="flex items-center gap-2">
           <button
             onClick={() => {
-              const url = `http://${serverInfo.primaryDomain || 'thionline.ndc'}:${serverInfo.port || 3000}/student`;
+              const url = `http://${serverInfo.primaryDomain || 'thionline.local'}:${serverInfo.port || 3000}/student`;
               navigator.clipboard.writeText(url);
               setCopiedLink(true);
               setTimeout(() => setCopiedLink(false), 2000);
@@ -444,7 +444,7 @@ export default function LiveMonitor({ sessionId, onBack, onOpenEssayGrading, onO
           </button>
           <a
             href="/api/system/download-launcher"
-            download="ThiOnline_NDC.html"
+            download="ThiOnline.html"
             className="px-3 py-1.5 bg-sky-950/80 hover:bg-sky-900/80 text-sky-300 border border-sky-800/80 rounded-lg text-xs font-semibold transition flex items-center gap-1.5"
             title="Tải file mở phòng thi tự động đặt trên màn hình học sinh"
           >

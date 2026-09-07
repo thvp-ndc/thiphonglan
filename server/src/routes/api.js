@@ -20,9 +20,9 @@ router.get('/system/info', (req, res) => {
     success: true,
     serverIp: getLocalIpAddress(),
     port: req.app.get('port') || 3000,
-    primaryDomain: 'thionline.ndc',
+    primaryDomain: 'thionline.local',
     domainInfo,
-    studentDomainUrl: `http://thionline.ndc:${req.app.get('port') || 3000}/student`,
+    studentDomainUrl: `http://thionline.local:${req.app.get('port') || 3000}/student`,
     timestamp: new Date().toISOString()
   });
 });
@@ -32,7 +32,7 @@ router.get('/system/download-launcher', (req, res) => {
     const lanDomainService = req.app.get('lanDomainService');
     const htmlContent = lanDomainService ? lanDomainService.generateHtmlLauncher() : '';
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename="ThiOnline_NDC.html"');
+    res.setHeader('Content-Disposition', 'attachment; filename="ThiOnline.html"');
     res.send(htmlContent);
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -44,7 +44,7 @@ router.get('/system/download-bat', (req, res) => {
     const lanDomainService = req.app.get('lanDomainService');
     const batContent = lanDomainService ? lanDomainService.generateBatInstaller() : '';
     res.setHeader('Content-Type', 'application/x-bat');
-    res.setHeader('Content-Disposition', 'attachment; filename="CaiDatPhongMay_NDC.bat"');
+    res.setHeader('Content-Disposition', 'attachment; filename="CaiDatPhongMay.bat"');
     res.send(batContent);
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });

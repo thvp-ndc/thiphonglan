@@ -14,14 +14,15 @@ const http = require('node:http');
 const os = require('node:os');
 const { getLocalIpAddress } = require('./udpDiscovery');
 
-const PRIMARY_DOMAIN = 'thionline.ndc';
+const PRIMARY_DOMAIN = 'thionline.local';
 const SUPPORTED_DOMAINS = [
-  'thionline.ndc',
-  'www.thionline.ndc',
   'thionline.local',
+  'www.thionline.local',
   'kiemtra.local',
-  'thi.ndc',
-  'thi.local'
+  'thi.local',
+  'thionline.lan',
+  'thionline',
+  'thionline.ndc'
 ];
 
 function parseDnsQuestion(buffer) {
@@ -113,7 +114,7 @@ class LanDomainService {
     const clean = domain.toLowerCase().trim();
     if (SUPPORTED_DOMAINS.includes(clean)) return true;
     if (clean === this.hostname || clean === `${this.hostname}.local`) return true;
-    if (clean.endsWith('.ndc') || clean.endsWith('.lan') || clean.endsWith('.local')) {
+    if (clean.endsWith('.local') || clean.endsWith('.lan') || clean.endsWith('.ndc')) {
       if (clean.includes('thionline') || clean.includes('kiemtra') || clean.includes('thi')) return true;
     }
     return false;
