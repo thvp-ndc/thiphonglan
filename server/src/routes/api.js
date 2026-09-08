@@ -39,6 +39,18 @@ router.get('/system/download-launcher', (req, res) => {
   }
 });
 
+router.get('/system/download-firewall-fix', (req, res) => {
+  try {
+    const lanDomainService = req.app.get('lanDomainService');
+    const batContent = lanDomainService ? lanDomainService.generateFirewallFixBat() : '';
+    res.setHeader('Content-Type', 'application/x-bat');
+    res.setHeader('Content-Disposition', 'attachment; filename="MoKhoaTuongLua_ChoPhepMayHocSinh.bat"');
+    res.send(batContent);
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 router.get('/system/download-bat', (req, res) => {
   try {
     const lanDomainService = req.app.get('lanDomainService');

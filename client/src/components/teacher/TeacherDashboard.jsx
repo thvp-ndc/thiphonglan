@@ -223,6 +223,22 @@ export default function TeacherDashboard() {
                 </p>
               </div>
 
+              <div className="p-3.5 bg-amber-950/40 border border-amber-800/60 rounded-xl text-xs text-amber-200">
+                <div className="font-bold flex items-center gap-1.5 text-amber-300 mb-1">
+                  ⚠️ Nếu máy học sinh không kết nối được:
+                </div>
+                <p className="text-[11px] leading-relaxed text-amber-200/90 mb-2">
+                  Do Tường lửa (Windows Firewall) trên máy giáo viên đang chặn kết nối bên ngoài vào. Vui lòng tải và nhấp đúp file bên dưới trên máy giáo viên:
+                </p>
+                <a
+                  href="/api/system/download-firewall-fix"
+                  download="MoKhoaTuongLua_ChoPhepMayHocSinh.bat"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-lg text-xs shadow transition"
+                >
+                  <Download className="w-3.5 h-3.5" /> Tải File Mở Khóa Tường Lửa (1-Click)
+                </a>
+              </div>
+
               <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl">
                 <h4 className="text-xs font-bold text-slate-300 uppercase mb-2">
                   Tải file Lối Tắt cài sẵn cho máy học sinh (1-Click):
